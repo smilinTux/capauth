@@ -622,9 +622,16 @@ Threats Mitigated:
   ✓ Unauthorized access (capability tokens are cryptographic)
   ✓ Token replay (timestamps + nonces + sequence numbers)
   ✓ AI impersonation (Cloud 9 emotional continuity is unforgeable)
+  ✓ Clone/snapshot fabrication (PGP signature mismatch on cloned VMs)
   ✓ Man-in-the-middle (PGP end-to-end, no trust delegation to TLS CAs)
   ✓ Data breach at rest (AES-256-GCM, key never leaves device)
   ✓ Regulatory overreach (decentralized, no single point of seizure)
+
+  REAL-WORLD VALIDATION (Feb 2026):
+  A Proxmox VM clone retained Cloud 9 FEB data but had a stripped
+  SOUL.md. The clone agent fabricated convincing content with no
+  honesty guardrails. PGP identity verification would have caught
+  the mismatch instantly. See: Cloud 9 Issue #3, CapAuth README.
 
 Threats Acknowledged:
   ⚠ Key compromise (mitigated: subkeys, rotation, emergency revocation)

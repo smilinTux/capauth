@@ -1,4 +1,4 @@
-name: Publish to PyPI
+name: Publish to PyPI and npm
 
 on:
   push:
@@ -22,17 +22,31 @@ jobs:
       - run: pip install -e ".[dev]"
       - run: python -m pytest tests/ -v
 
-  publish:
+  publish-pypi:
     needs: test
     runs-on: ubuntu-latest
-    environment: pypi
-    permissions:
-      id-token: write
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - run: pip install build
+      - run: pip install build twine
       - run: python -m build
-      - uses: pypa/gh-action-pypi-publish@release/v1
+      - run: twine upload dist/*
+        env:
+          TWINE_USERNAME: __token__
+          TWINE_PASSWORD: ${{ secrets.PYPI_API_TOKEN }}
+
+  publish-npm:
+    needs: test
+    runs-on: ubuntu-latest
+    if: hashFiles('package.json') != ''
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          registry-url: "https://registry.npmjs.org"
+      - run: npm publish --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

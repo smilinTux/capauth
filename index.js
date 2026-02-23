@@ -12,12 +12,13 @@ const VERSION = "0.1.0";
 const PYTHON_PACKAGE = "capauth";
 
 function checkInstalled() {
-  try {
-    execSync(`python3 -c "import capauth"`, { stdio: "pipe" });
-    return true;
-  } catch {
-    return false;
+  for (const py of ["python3", "python"]) {
+    try {
+      execSync(`${py} -c "import capauth"`, { stdio: "pipe" });
+      return true;
+    } catch {}
   }
+  return false;
 }
 
 function run(args) {

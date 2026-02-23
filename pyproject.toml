@@ -1,0 +1,74 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "capauth"
+version = "0.1.0"
+description = "Capability-based Authentication — decentralized, PGP-based identity and authorization"
+readme = "README.md"
+license = {text = "GPL-3.0-or-later"}
+requires-python = ">=3.10"
+authors = [
+    {name = "smilinTux", email = "admin@smilintux.org"},
+]
+keywords = ["authentication", "pgp", "decentralized", "identity", "capability"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: GNU General Public License v3 or later (GPLv3+)",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Security :: Cryptography",
+]
+dependencies = [
+    "click>=8.1",
+    "pydantic>=2.0",
+    "PGPy>=0.6",
+    "pyyaml>=6.0",
+    "rich>=13.0",
+]
+
+[project.optional-dependencies]
+gnupg = [
+    "python-gnupg>=0.5",
+]
+dev = [
+    "pytest>=7.0",
+    "pytest-cov>=4.0",
+    "black>=24.0",
+    "ruff>=0.3",
+]
+all = [
+    "capauth[gnupg,dev]",
+]
+
+[project.scripts]
+capauth = "capauth.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/smilinTux/capauth"
+Repository = "https://github.com/smilinTux/capauth"
+Issues = "https://github.com/smilinTux/capauth/issues"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.black]
+line-length = 99
+target-version = ["py310"]
+
+[tool.ruff]
+line-length = 99
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "N", "W"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+addopts = "-v --tb=short"

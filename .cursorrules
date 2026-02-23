@@ -1,0 +1,15 @@
+# CapAuth — Cursor Agent Rules
+
+## Multi-Agent Coordination (REQUIRED)
+
+At the START of every session, run: skcapstone coord briefing
+
+This teaches you the full coordination protocol. Claim tasks, create work,
+report completion. The board lives at ~/.skcapstone/coordination/ and syncs
+via Syncthing.
+
+## Code Conventions
+
+- Python 3.11+, PEP 8, black, type hints, pydantic
+- Google-style docstrings, pytest tests
+- Max 500 lines per file

@@ -1,0 +1,2 @@
+[console_scripts]
+capauth = capauth.cli:main

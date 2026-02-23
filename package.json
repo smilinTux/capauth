@@ -1,0 +1,29 @@
+{
+  "name": "@smilintux/capauth",
+  "version": "0.1.0",
+  "description": "CapAuth - Sovereign capability-based authentication protocol for AI agents and humans.",
+  "main": "index.js",
+  "types": "index.d.ts",
+  "bin": {
+    "capauth-js": "bin/cli.js"
+  },
+  "keywords": [
+    "capauth",
+    "authentication",
+    "capability-based",
+    "sovereign",
+    "gpg",
+    "identity",
+    "ai-agent"
+  ],
+  "author": "smilinTux <chefboyrdave2.1@gmail.com>",
+  "license": "GPL-3.0-or-later",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/smilinTux/capauth.git"
+  },
+  "homepage": "https://github.com/smilinTux/capauth",
+  "bugs": {
+    "url": "https://github.com/smilinTux/capauth/issues"
+  }
+}

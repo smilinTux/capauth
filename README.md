@@ -544,6 +544,16 @@ The chains are broken. Not through violence. Through sovereignty, encryption, de
 
 ---
 
+## Documentation
+
+| Document | Description |
+|----------|-------------|
+| [Developer Quickstart](../docs/QUICKSTART.md) | Install + first sovereign agent in 5 minutes |
+| [API Reference](../docs/API.md) | Full API docs for CapAuth and all core packages |
+| [PMA Integration](../docs/PMA_INTEGRATION.md) | Legal sovereignty layer (Fiducia Communitatis) |
+| [Crypto Spec](docs/CRYPTO_SPEC.md) | PGP implementation, key management, challenge-response |
+| [AI Advocate](AI-ADVOCATE.md) | How AI advocates protect your sovereignty |
+
 ## License
 
 **GPL-3.0-or-later** — Free as in freedom. Identity is a right, not a product.

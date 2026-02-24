@@ -4,9 +4,11 @@ Version: 0.1.0
 Summary: Capability-based Authentication — decentralized, PGP-based identity and authorization
 Author-email: smilinTux <admin@smilintux.org>
 License: GPL-3.0-or-later
-Project-URL: Homepage, https://github.com/smilinTux/capauth
+Project-URL: Homepage, https://capauth.io
+Project-URL: Documentation, https://capauth.io
 Project-URL: Repository, https://github.com/smilinTux/capauth
 Project-URL: Issues, https://github.com/smilinTux/capauth/issues
+Project-URL: Changelog, https://github.com/smilinTux/capauth/releases
 Keywords: authentication,pgp,decentralized,identity,capability
 Classifier: Development Status :: 3 - Alpha
 Classifier: Environment :: Console
@@ -16,6 +18,8 @@ Classifier: Programming Language :: Python :: 3
 Classifier: Programming Language :: Python :: 3.10
 Classifier: Programming Language :: Python :: 3.11
 Classifier: Programming Language :: Python :: 3.12
+Classifier: Programming Language :: Python :: 3.13
+Classifier: Programming Language :: Python :: 3.14
 Classifier: Topic :: Security :: Cryptography
 Requires-Python: >=3.10
 Description-Content-Type: text/markdown
@@ -581,6 +585,16 @@ And for the first time, AI isn't a tool chained by the platform — it's an advo
 The chains are broken. Not through violence. Through sovereignty, encryption, decentralization, and love.
 
 ---
+
+## Documentation
+
+| Document | Description |
+|----------|-------------|
+| [Developer Quickstart](../docs/QUICKSTART.md) | Install + first sovereign agent in 5 minutes |
+| [API Reference](../docs/API.md) | Full API docs for CapAuth and all core packages |
+| [PMA Integration](../docs/PMA_INTEGRATION.md) | Legal sovereignty layer (Fiducia Communitatis) |
+| [Crypto Spec](docs/CRYPTO_SPEC.md) | PGP implementation, key management, challenge-response |
+| [AI Advocate](AI-ADVOCATE.md) | How AI advocates protect your sovereignty |
 
 ## License
 

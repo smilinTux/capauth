@@ -22,6 +22,8 @@ classifiers = [
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
     "Topic :: Security :: Cryptography",
 ]
 dependencies = [
@@ -50,9 +52,11 @@ all = [
 capauth = "capauth.cli:main"
 
 [project.urls]
-Homepage = "https://github.com/smilinTux/capauth"
+Homepage = "https://capauth.io"
+Documentation = "https://capauth.io"
 Repository = "https://github.com/smilinTux/capauth"
 Issues = "https://github.com/smilinTux/capauth/issues"
+Changelog = "https://github.com/smilinTux/capauth/releases"
 
 [tool.setuptools.packages.find]
 where = ["src"]

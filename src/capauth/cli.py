@@ -877,6 +877,116 @@ def mesh_announce(ctx: click.Context) -> None:
         raise SystemExit(1)
 
 
+@main.command("login")
+@click.argument("service_url")
+@click.option(
+    "--passphrase",
+    "-p",
+    default=None,
+    envvar="CAPAUTH_PASSPHRASE",
+    help="Private key passphrase for PGPy backend. Not needed with system GPG keyring.",
+)
+@click.option(
+    "--no-claims",
+    is_flag=True,
+    default=False,
+    help="Authenticate anonymously — send fingerprint only, no profile claims.",
+)
+@click.option(
+    "--with-claims",
+    is_flag=True,
+    default=False,
+    help="Explicitly include profile claims from ~/.capauth/profile.yml. (default behaviour)",
+)
+@click.option(
+    "--service-profile",
+    default=None,
+    help="Use a named service profile from profile.yml instead of defaults.",
+)
+@click.option(
+    "--output-token",
+    "-o",
+    type=click.Path(),
+    default=None,
+    help="Write received tokens to this file instead of caching automatically.",
+)
+@click.option(
+    "--no-gpg",
+    is_flag=True,
+    default=False,
+    help="Skip system GPG keyring and use the PGPy backend exclusively.",
+)
+@click.pass_context
+def login(
+    ctx: click.Context,
+    service_url: str,
+    passphrase: Optional[str],
+    no_claims: bool,
+    with_claims: bool,
+    service_profile: Optional[str],
+    output_token: Optional[str],
+    no_gpg: bool,
+) -> None:
+    """Authenticate to a CapAuth-enabled service.
+
+    Signs the challenge with your system GPG key (gpg --detach-sign) if the
+    fingerprint from profile.yml is in your GPG keyring. Otherwise uses the
+    PGPy backend with the private key stored in ~/.capauth/.
+
+    Profile claims from ~/.capauth/profile.yml are included by default.
+    Use --with-claims to make this explicit, or --no-claims for anonymous auth.
+
+    Tokens are cached at ~/.capauth/tokens/<service_host>/tokens.json.
+
+    \b
+    Examples:
+        capauth login nextcloud.penguin.kingdom
+        capauth login https://gitea.penguin.kingdom --with-claims
+        capauth login nextcloud.penguin.kingdom --no-claims
+        capauth login https://forgejo.local --no-gpg --passphrase secret
+    """
+    from .login import do_login
+
+    base = ctx.obj.get("home")
+
+    # --with-claims is the explicit form of the default; --no-claims overrides both
+    send_claims = not no_claims
+
+    # Only prompt for passphrase if we'll need it (no-gpg mode or explicitly requested)
+    if passphrase is None and no_gpg:
+        passphrase = click.prompt("Private key passphrase", hide_input=True, default="")
+    elif passphrase is None:
+        passphrase = ""
+
+    try:
+        result = do_login(
+            service_url=service_url,
+            passphrase=passphrase,
+            no_claims=not send_claims,
+            service_profile_name=service_profile,
+            output_token_path=Path(output_token) if output_token else None,
+            base_dir=base,
+            use_gpg_keyring=not no_gpg,
+        )
+
+        console.print(
+            Panel(
+                f"[bold green]Logged into [cyan]{result['service']}[/][/]\n\n"
+                + (f"as [bold]{result.get('name', result['fingerprint'][:8] + '...')}[/]\n" if result.get("name") else "")
+                + f"fingerprint: [dim]{result['fingerprint'][:8]}...{result['fingerprint'][-4:]}[/]\n\n"
+                + f"[dim]Token cached at:[/] {result['token_path']}",
+                title="CapAuth Login",
+                border_style="green",
+            )
+        )
+    except CapAuthError as exc:
+        console.print(f"[bold red]Login failed:[/] {exc}")
+        raise SystemExit(1)
+    except Exception as exc:
+        console.print(f"[bold red]Login error:[/] {exc}")
+        raise SystemExit(1)
+
+
 def _render_profile(p: "SovereignProfile") -> None:
     """Pretty-print a sovereign profile using Rich.
 

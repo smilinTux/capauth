@@ -91,3 +91,11 @@ class ChallengeResponse(BaseModel):
     signature: str = Field(description="PGP signature over the challenge bytes")
     responder_fingerprint: str = Field(description="Responder's PGP fingerprint")
     created: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+
+# Django models for Authentik custom stage (loaded only when Django is available).
+# Ensures CapAuthStage and CapAuthKeyRegistry are discovered when "capauth" is in INSTALLED_APPS.
+try:
+    from capauth.authentik.stage import CapAuthStage, CapAuthKeyRegistry  # noqa: F401
+except ImportError:
+    pass

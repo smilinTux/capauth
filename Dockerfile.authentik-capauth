@@ -1,0 +1,14 @@
+FROM ghcr.io/goauthentik/server:2025.12.3
+
+# Install capauth into the Authentik server image so the custom stage
+# models, views, and migrations are available inside Django.
+USER root
+
+# Copy capauth source into the image and install in editable mode.
+# Adjust this path if you build from a mono-repo.
+COPY . /app/capauth
+RUN pip install --no-cache-dir -e /app/capauth
+
+# Drop privileges back to the default Authentik user.
+USER authentik
+

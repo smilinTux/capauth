@@ -32,24 +32,35 @@ dependencies = [
     "PGPy>=0.6",
     "pyyaml>=6.0",
     "rich>=13.0",
+    "httpx>=0.25",
 ]
 
 [project.optional-dependencies]
 gnupg = [
     "python-gnupg>=0.5",
 ]
+service = [
+    "fastapi>=0.110",
+    "uvicorn[standard]>=0.27",
+    "PyJWT>=2.8",
+    "python-gnupg>=0.5",
+    "httpx>=0.25",
+]
 dev = [
     "pytest>=7.0",
     "pytest-cov>=4.0",
+    "pytest-asyncio>=0.23",
+    "httpx>=0.25",
     "black>=24.0",
     "ruff>=0.3",
 ]
 all = [
-    "capauth[gnupg,dev]",
+    "capauth[gnupg,service,dev]",
 ]
 
 [project.scripts]
 capauth = "capauth.cli:main"
+capauth-service = "capauth.service.server:main"
 
 [project.urls]
 Homepage = "https://capauth.io"

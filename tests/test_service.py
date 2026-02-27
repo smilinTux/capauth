@@ -464,3 +464,164 @@ class TestJWTTokens:
         assert decoded["sub"] == FAKE_FP
         assert decoded["iss"] == "jwt.capauth.test"
         assert "pgp" in decoded["amr"]
+
+
+class TestQRLogin:
+    """Tests for QR-based mobile login endpoints."""
+
+    @pytest.fixture(autouse=True)
+    def setup_app(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Configure the app with a temp database."""
+        monkeypatch.setenv("CAPAUTH_DB_PATH", str(tmp_path / "qr_test.db"))
+        monkeypatch.setenv("CAPAUTH_ADMIN_TOKEN", "qr-admin-token")
+        monkeypatch.setenv("CAPAUTH_SERVICE_ID", "qr.capauth.test")
+        monkeypatch.setenv("CAPAUTH_JWT_SECRET", "test-qr-jwt-secret-at-least-32-chars!")
+        monkeypatch.setenv("CAPAUTH_BASE_URL", "https://qr.capauth.test")
+
+        import capauth.service.app as svc_app
+        from capauth.service.keystore import KeyStore
+        if svc_app._keystore is not None:
+            try:
+                svc_app._keystore.close()
+            except Exception:
+                pass
+        svc_app._keystore = KeyStore(tmp_path / "qr_test.db")
+        svc_app.SERVICE_ID = "qr.capauth.test"
+        svc_app.JWT_SECRET = "test-qr-jwt-secret-at-least-32-chars!"
+
+        from fastapi.testclient import TestClient
+        self.client = TestClient(svc_app.app)
+        self.svc_app = svc_app
+
+    def test_qr_challenge_returns_nonce(self) -> None:
+        """QR challenge should return a nonce and callback URL."""
+        resp = self.client.post("/capauth/v1/qr-challenge", json={})
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "nonce" in data
+        assert data["service"] == "qr.capauth.test"
+        assert "qr-verify" in data["callback"]
+        assert data["capauth_qr"] == "1.0"
+
+    def test_qr_status_pending(self) -> None:
+        """QR status for a fresh nonce should be 'pending'."""
+        challenge = self.client.post("/capauth/v1/qr-challenge", json={}).json()
+        resp = self.client.get(f"/capauth/v1/qr-status/{challenge['nonce']}")
+        assert resp.status_code == 200
+        assert resp.json()["status"] == "pending"
+
+    def test_qr_status_expired_nonce(self) -> None:
+        """QR status for an unknown nonce should be 'expired'."""
+        resp = self.client.get("/capauth/v1/qr-status/nonexistent-nonce-id")
+        assert resp.status_code == 200
+        assert resp.json()["status"] == "expired"
+
+    def test_qr_verify_unknown_fingerprint(self) -> None:
+        """QR verify with unknown fingerprint and no public key returns 401."""
+        challenge = self.client.post("/capauth/v1/qr-challenge", json={}).json()
+        resp = self.client.post(
+            f"/capauth/v1/qr-verify/{challenge['nonce']}",
+            json={
+                "fingerprint": "E" * 40,
+                "nonce": challenge["nonce"],
+                "nonce_signature": "fake-sig",
+            },
+        )
+        assert resp.status_code == 401
+
+    def test_qr_verify_missing_fields(self) -> None:
+        """QR verify with missing required fields returns 400."""
+        challenge = self.client.post("/capauth/v1/qr-challenge", json={}).json()
+        resp = self.client.post(
+            f"/capauth/v1/qr-verify/{challenge['nonce']}",
+            json={
+                "fingerprint": "",
+                "nonce": challenge["nonce"],
+                "nonce_signature": "",
+            },
+        )
+        assert resp.status_code == 400
+
+    def test_qr_login_page_renders(self) -> None:
+        """QR login page should render HTML with QR initialization script."""
+        resp = self.client.get("/capauth/v1/qr-login")
+        assert resp.status_code == 200
+        assert "text/html" in resp.headers["content-type"]
+        assert "CapAuth Mobile Login" in resp.text
+        assert "qr-challenge" in resp.text
+        assert "qr-status" in resp.text
+
+    def test_qr_login_page_with_redirect(self) -> None:
+        """QR login page should include redirect URL when provided."""
+        resp = self.client.get("/capauth/v1/qr-login?redirect=https://app.example.com/dashboard")
+        assert resp.status_code == 200
+        assert "https://app.example.com/dashboard" in resp.text
+
+    def test_qr_full_flow_with_patched_verify(self) -> None:
+        """Full QR flow: challenge -> mobile verify -> desktop poll gets token."""
+        from unittest.mock import patch
+
+        # Enroll a key
+        self.svc_app._keystore.enroll("F" * 40, FAKE_ARMOR, approved=True)
+
+        # Desktop: get QR challenge
+        challenge = self.client.post("/capauth/v1/qr-challenge", json={}).json()
+        nonce_id = challenge["nonce"]
+
+        # Desktop: poll — should be pending
+        status = self.client.get(f"/capauth/v1/qr-status/{nonce_id}").json()
+        assert status["status"] == "pending"
+
+        # Mobile: submit signed response (bypass real PGP verification)
+        fake_claims = {"sub": "F" * 40, "capauth_fingerprint": "F" * 40, "amr": ["pgp", "qr"]}
+        with patch("capauth.service.app.verify_auth_response", return_value=(True, "", fake_claims)):
+            verify_resp = self.client.post(
+                f"/capauth/v1/qr-verify/{nonce_id}",
+                json={
+                    "fingerprint": "F" * 40,
+                    "nonce": nonce_id,
+                    "nonce_signature": "fake-patched-sig",
+                },
+            )
+        assert verify_resp.status_code == 200
+        assert verify_resp.json()["authenticated"] is True
+
+        # Desktop: poll again — should be authenticated
+        status = self.client.get(f"/capauth/v1/qr-status/{nonce_id}").json()
+        assert status["status"] == "authenticated"
+        assert status["fingerprint"] == "F" * 40
+        assert status["access_token"] != ""
+
+        # Verify the token is a valid JWT
+        import jwt as pyjwt
+        decoded = pyjwt.decode(
+            status["access_token"],
+            "test-qr-jwt-secret-at-least-32-chars!",
+            algorithms=["HS256"],
+        )
+        assert decoded["sub"] == "F" * 40
+        assert "qr" in decoded["amr"]
+
+    def test_qr_status_consumed_after_poll(self) -> None:
+        """Once desktop polls an authenticated result, subsequent polls return expired."""
+        from unittest.mock import patch
+
+        self.svc_app._keystore.enroll("G" * 40, FAKE_ARMOR, approved=True)
+
+        challenge = self.client.post("/capauth/v1/qr-challenge", json={}).json()
+        nonce_id = challenge["nonce"]
+
+        fake_claims = {"sub": "G" * 40}
+        with patch("capauth.service.app.verify_auth_response", return_value=(True, "", fake_claims)):
+            self.client.post(
+                f"/capauth/v1/qr-verify/{nonce_id}",
+                json={"fingerprint": "G" * 40, "nonce": nonce_id, "nonce_signature": "sig"},
+            )
+
+        # First poll gets the result
+        first = self.client.get(f"/capauth/v1/qr-status/{nonce_id}").json()
+        assert first["status"] == "authenticated"
+
+        # Second poll — result consumed, nonce may be gone
+        second = self.client.get(f"/capauth/v1/qr-status/{nonce_id}").json()
+        assert second["status"] in ("pending", "expired")

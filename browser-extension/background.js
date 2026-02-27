@@ -362,6 +362,10 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       handleClearTokens().then(sendResponse);
       break;
 
+    case "QR_LOGIN":
+      handleQRLogin(payload).then(sendResponse);
+      break;
+
     default:
       sendResponse({ error: `Unknown action: ${action}` });
   }
@@ -620,6 +624,44 @@ async function handleClearTokens() {
       await chrome.storage.local.remove(tokenKeys);
     }
     return { success: true, cleared: tokenKeys.length };
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
+}
+
+/**
+ * Open the QR login page for mobile-to-desktop authentication.
+ *
+ * Opens the CapAuth service's QR login page in a new tab. The page
+ * generates a QR code for the mobile device to scan and polls for
+ * completion.
+ *
+ * @param {Object} payload
+ * @param {string} [payload.redirect] - URL to redirect after authentication.
+ * @returns {Promise<Object>} Result with the QR login page URL.
+ */
+async function handleQRLogin(payload) {
+  const { redirect = "" } = payload || {};
+
+  try {
+    const settings = await loadSettings();
+    const serviceUrl = settings.serviceUrl;
+    if (!serviceUrl) {
+      return {
+        success: false,
+        error: "No service URL configured. Open extension settings.",
+      };
+    }
+
+    const qrUrl = new URL("/capauth/v1/qr-login", serviceUrl);
+    if (redirect) {
+      qrUrl.searchParams.set("redirect", redirect);
+    }
+
+    // Open the QR login page in a new tab
+    await chrome.tabs.create({ url: qrUrl.toString() });
+
+    return { success: true, url: qrUrl.toString() };
   } catch (err) {
     return { success: false, error: err.message };
   }

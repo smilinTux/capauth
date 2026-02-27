@@ -45,6 +45,7 @@ service = [
     "PyJWT>=2.8",
     "python-gnupg>=0.5",
     "httpx>=0.25",
+    "segno>=1.6",
 ]
 dev = [
     "pytest>=7.0",

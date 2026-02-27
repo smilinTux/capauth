@@ -85,7 +85,7 @@ Authentik’s flow executor renders the challenge in the browser and expects a *
   1. If `need_fingerprint` is true: show a text input for the 40-char fingerprint and a “Continue” button; on submit, POST `{ fingerprint }`.
   2. If `need_fingerprint` is false: show the nonce (and optionally `qr_payload` as QR, or copyable text); provide a way for the user to signal “I have signed” (e.g. “Continue” that POSTs the full signed response). In practice the signed response is filled by a CapAuth client (CLI/extension/mobile) or the user pastes it; the component must send that payload to the flow executor.
 
-Until this component is built and bundled into Authentik’s web build, the CapAuth stage will load but the flow UI will show a missing-component state when the stage runs.
+The `ak-stage-capauth` Lit component is provided at `capauth/web/stages/capauth/CapAuthStage.ts` (305 lines). It implements both the fingerprint input step and the nonce/signed-response step with QR support. Copy it into Authentik’s web build and register it to complete the integration.
 
 ### 5. Create a stage and bind to a flow
 

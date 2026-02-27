@@ -1,0 +1,389 @@
+/* CapAuth — Popup Styles
+   Dark sovereign theme: #0f0f1a background, #7C3AED purple accent, #00e5ff cyan highlights */
+
+:root {
+  --bg-primary:     #0f0f1a;
+  --bg-secondary:   #161628;
+  --bg-card:        #1a1a35;
+  --bg-input:       #1e1e3f;
+  --accent:         #7C3AED;
+  --accent-hover:   #6d28d9;
+  --accent-light:   #a78bfa;
+  --accent-glow:    rgba(124, 58, 237, 0.3);
+  --cyan:           #00e5ff;
+  --cyan-glow:      rgba(0, 229, 255, 0.2);
+  --text-primary:   #e2e8f0;
+  --text-secondary: #94a3b8;
+  --text-muted:     #64748b;
+  --success:        #10b981;
+  --warning:        #f59e0b;
+  --error:          #ef4444;
+  --border:         rgba(124, 58, 237, 0.2);
+  --border-cyan:    rgba(0, 229, 255, 0.15);
+  --radius:         8px;
+  --radius-sm:      4px;
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  width: 340px;
+  min-height: 420px;
+  max-height: 520px;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-size: 13px;
+  overflow-x: hidden;
+  overflow-y: auto;
+}
+
+/* ---------- Header ---------- */
+
+.header {
+  background: var(--bg-secondary);
+  border-bottom: 1px solid var(--border);
+  padding: 10px 14px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  position: sticky;
+  top: 0;
+  z-index: 10;
+}
+
+.header-logo {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.header-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.header-title {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--accent-light);
+  letter-spacing: 0.04em;
+}
+
+.header-subtitle {
+  font-size: 10px;
+  color: var(--text-muted);
+  margin-top: 1px;
+}
+
+.settings-btn {
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 5px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.12s ease;
+}
+
+.settings-btn:hover {
+  color: var(--accent-light);
+  border-color: var(--accent);
+  background: var(--accent-glow);
+}
+
+/* ---------- Status Bar ---------- */
+
+.status-bar {
+  background: var(--bg-secondary);
+  padding: 6px 14px;
+  display: flex;
+  align-items: center;
+  border-bottom: 1px solid var(--border);
+}
+
+.status-indicator {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+
+.dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.dot.connected    { background: var(--success); box-shadow: 0 0 6px var(--success); }
+.dot.disconnected { background: var(--error); }
+.dot.checking     { background: var(--warning); animation: pulse 1s infinite; }
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+
+/* ---------- Identity Section ---------- */
+
+.identity-section {
+  padding: 10px 14px;
+  background: var(--bg-secondary);
+  border-bottom: 1px solid var(--border);
+}
+
+.fingerprint-label {
+  font-size: 9px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--text-muted);
+  margin-bottom: 4px;
+}
+
+.fingerprint-display {
+  background: var(--bg-primary);
+  border: 1px solid var(--border-cyan);
+  border-radius: var(--radius-sm);
+  padding: 6px 10px;
+  font-family: "SF Mono", "Fira Code", "Cascadia Code", monospace;
+  font-size: 11px;
+  color: var(--cyan);
+  letter-spacing: 0.05em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.fingerprint-display.not-configured {
+  color: var(--text-muted);
+  font-style: italic;
+  font-family: inherit;
+}
+
+/* ---------- Main Sections ---------- */
+
+.content {
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.section {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.section-label {
+  font-size: 9px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--text-muted);
+}
+
+/* ---------- Sign In Button ---------- */
+
+.btn-signin {
+  background: linear-gradient(135deg, var(--accent), #5b21b6);
+  border: none;
+  border-radius: var(--radius);
+  padding: 14px 16px;
+  color: #fff;
+  font-size: 14px;
+  font-weight: 700;
+  cursor: pointer;
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  letter-spacing: 0.02em;
+  transition: all 0.15s ease;
+  box-shadow: 0 4px 15px var(--accent-glow);
+}
+
+.btn-signin:hover:not(:disabled) {
+  background: linear-gradient(135deg, var(--accent-hover), #4c1d95);
+  box-shadow: 0 6px 20px rgba(124, 58, 237, 0.5);
+  transform: translateY(-1px);
+}
+
+.btn-signin:active:not(:disabled) {
+  transform: translateY(0);
+}
+
+.btn-signin:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.btn-signin.authenticating {
+  animation: authPulse 1.2s ease infinite;
+}
+
+@keyframes authPulse {
+  0%, 100% { box-shadow: 0 4px 15px var(--accent-glow); }
+  50% { box-shadow: 0 4px 30px rgba(124, 58, 237, 0.7); }
+}
+
+.btn-signin.authenticated {
+  background: linear-gradient(135deg, #059669, #047857);
+  box-shadow: 0 4px 15px rgba(16, 185, 129, 0.3);
+}
+
+/* ---------- Service Display ---------- */
+
+.service-display {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 8px 10px;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.service-display.active {
+  color: var(--cyan);
+  border-color: var(--border-cyan);
+}
+
+/* ---------- Auth Result ---------- */
+
+.auth-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 10px 12px;
+}
+
+.auth-card.success {
+  border-color: rgba(16, 185, 129, 0.3);
+}
+
+.auth-card.error {
+  border-color: rgba(239, 68, 68, 0.3);
+}
+
+.auth-status-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.auth-status-icon {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+
+.auth-status-icon.success { background: var(--success); box-shadow: 0 0 6px var(--success); }
+.auth-status-icon.error   { background: var(--error); }
+
+#auth-status-text {
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.auth-detail {
+  font-size: 11px;
+  color: var(--text-muted);
+  line-height: 1.5;
+}
+
+.auth-detail code {
+  background: var(--bg-primary);
+  padding: 1px 4px;
+  border-radius: 2px;
+  font-family: "SF Mono", "Fira Code", monospace;
+  font-size: 10px;
+  color: var(--cyan);
+}
+
+/* ---------- Divider ---------- */
+
+.divider {
+  height: 1px;
+  background: var(--border);
+  margin: 2px 0;
+}
+
+/* ---------- Toast Notification ---------- */
+
+.toast {
+  position: fixed;
+  bottom: 44px;
+  left: 50%;
+  transform: translateX(-50%) translateY(20px);
+  background: var(--bg-card);
+  border: 1px solid var(--accent);
+  border-radius: var(--radius);
+  padding: 8px 14px;
+  font-size: 12px;
+  color: var(--text-primary);
+  opacity: 0;
+  transition: all 0.2s ease;
+  white-space: nowrap;
+  pointer-events: none;
+  z-index: 100;
+  box-shadow: 0 4px 15px rgba(0, 0, 0, 0.5);
+}
+
+.toast.show {
+  opacity: 1;
+  transform: translateX(-50%) translateY(0);
+}
+
+.toast.success { border-color: var(--success); color: var(--success); }
+.toast.error   { border-color: var(--error);   color: var(--error);   }
+
+/* ---------- Loading Spinner ---------- */
+
+.spinner {
+  width: 14px;
+  height: 14px;
+  border: 2px solid rgba(255, 255, 255, 0.2);
+  border-top-color: #fff;
+  border-radius: 50%;
+  animation: spin 0.6s linear infinite;
+  display: inline-block;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+/* ---------- Footer ---------- */
+
+.footer {
+  background: var(--bg-secondary);
+  border-top: 1px solid var(--border);
+  padding: 8px 14px;
+  text-align: center;
+  font-size: 10px;
+  color: var(--text-muted);
+  position: sticky;
+  bottom: 0;
+}
+
+.footer a {
+  color: var(--accent-light);
+  text-decoration: none;
+}
+
+.footer a:hover {
+  text-decoration: underline;
+}

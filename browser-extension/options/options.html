@@ -1,0 +1,367 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>CapAuth Settings</title>
+  <style>
+    :root {
+      --bg-primary:     #0f0f1a;
+      --bg-secondary:   #161628;
+      --bg-card:        #1a1a35;
+      --bg-input:       #1e1e3f;
+      --accent:         #7C3AED;
+      --accent-hover:   #6d28d9;
+      --accent-light:   #a78bfa;
+      --accent-glow:    rgba(124, 58, 237, 0.3);
+      --cyan:           #00e5ff;
+      --text-primary:   #e2e8f0;
+      --text-secondary: #94a3b8;
+      --text-muted:     #64748b;
+      --success:        #10b981;
+      --error:          #ef4444;
+      --border:         rgba(124, 58, 237, 0.2);
+      --border-cyan:    rgba(0, 229, 255, 0.15);
+      --radius:         8px;
+      --radius-sm:      4px;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      background: var(--bg-primary);
+      color: var(--text-primary);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      font-size: 14px;
+      padding: 24px;
+      max-width: 560px;
+      margin: 0 auto;
+      line-height: 1.5;
+    }
+
+    h1 {
+      color: var(--accent-light);
+      font-size: 20px;
+      margin-bottom: 4px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .subtitle {
+      color: var(--text-muted);
+      font-size: 12px;
+      margin-bottom: 24px;
+    }
+
+    h2 {
+      color: var(--text-secondary);
+      font-size: 13px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      margin: 24px 0 10px;
+      padding-bottom: 6px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .field {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      margin-bottom: 14px;
+    }
+
+    label {
+      font-size: 11px;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      font-weight: 600;
+    }
+
+    .field-hint {
+      font-size: 11px;
+      color: var(--text-muted);
+      margin-top: 2px;
+    }
+
+    input[type="text"],
+    input[type="url"],
+    input[type="password"],
+    textarea {
+      background: var(--bg-input);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      color: var(--text-primary);
+      padding: 8px 12px;
+      font-size: 13px;
+      width: 100%;
+      outline: none;
+      transition: border-color 0.12s;
+      font-family: inherit;
+    }
+
+    input[type="text"]:focus,
+    input[type="url"]:focus,
+    input[type="password"]:focus,
+    textarea:focus {
+      border-color: var(--accent);
+    }
+
+    textarea {
+      resize: vertical;
+      min-height: 100px;
+      font-family: "SF Mono", "Fira Code", "Cascadia Code", monospace;
+      font-size: 11px;
+      line-height: 1.4;
+    }
+
+    .fingerprint-input {
+      font-family: "SF Mono", "Fira Code", "Cascadia Code", monospace;
+      font-size: 12px;
+      letter-spacing: 0.04em;
+      color: var(--cyan);
+    }
+
+    /* Toggle switch */
+    .toggle-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 8px 0;
+    }
+
+    .toggle-label {
+      font-size: 13px;
+      color: var(--text-primary);
+    }
+
+    .toggle-desc {
+      font-size: 11px;
+      color: var(--text-muted);
+      margin-top: 2px;
+    }
+
+    .toggle {
+      position: relative;
+      width: 40px;
+      height: 22px;
+      flex-shrink: 0;
+    }
+
+    .toggle input {
+      opacity: 0;
+      width: 0;
+      height: 0;
+    }
+
+    .toggle-slider {
+      position: absolute;
+      cursor: pointer;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 11px;
+      transition: all 0.2s;
+    }
+
+    .toggle-slider:before {
+      position: absolute;
+      content: "";
+      height: 16px;
+      width: 16px;
+      left: 2px;
+      bottom: 2px;
+      background: var(--text-muted);
+      border-radius: 50%;
+      transition: all 0.2s;
+    }
+
+    .toggle input:checked + .toggle-slider {
+      background: var(--accent);
+      border-color: var(--accent);
+    }
+
+    .toggle input:checked + .toggle-slider:before {
+      transform: translateX(18px);
+      background: #fff;
+    }
+
+    /* Buttons */
+    .btn {
+      border: none;
+      border-radius: var(--radius-sm);
+      padding: 9px 16px;
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      transition: all 0.12s ease;
+    }
+
+    .btn-primary {
+      background: var(--accent);
+      color: #fff;
+    }
+
+    .btn-primary:hover {
+      background: var(--accent-hover);
+    }
+
+    .btn-danger {
+      background: transparent;
+      color: var(--error);
+      border: 1px solid rgba(239, 68, 68, 0.3);
+    }
+
+    .btn-danger:hover {
+      background: rgba(239, 68, 68, 0.1);
+    }
+
+    .btn-row {
+      display: flex;
+      gap: 8px;
+      margin-top: 20px;
+    }
+
+    .save-status {
+      margin-top: 10px;
+      font-size: 12px;
+      color: var(--success);
+      display: none;
+    }
+
+    /* About section */
+    .about {
+      margin-top: 32px;
+      padding-top: 16px;
+      border-top: 1px solid var(--border);
+      font-size: 12px;
+      color: var(--text-muted);
+      line-height: 1.8;
+    }
+
+    .about a {
+      color: var(--accent-light);
+      text-decoration: none;
+    }
+
+    .about a:hover {
+      text-decoration: underline;
+    }
+
+    .about strong {
+      color: var(--text-primary);
+    }
+
+    /* Security warning */
+    .security-notice {
+      background: rgba(245, 158, 11, 0.1);
+      border: 1px solid rgba(245, 158, 11, 0.2);
+      border-radius: var(--radius);
+      padding: 10px 12px;
+      font-size: 12px;
+      color: #f59e0b;
+      line-height: 1.5;
+      margin: 10px 0;
+    }
+  </style>
+</head>
+<body>
+
+  <h1>
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <path d="M12 2L3 7v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V7l-9-5z" fill="#7C3AED" opacity="0.3"/>
+      <path d="M12 2L3 7v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V7l-9-5z" stroke="#a78bfa" stroke-width="1.5" fill="none"/>
+      <path d="M10 12l2 2 4-4" stroke="#00e5ff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+    </svg>
+    CapAuth Settings
+  </h1>
+  <div class="subtitle">Configure your sovereign PGP identity for passwordless login</div>
+
+  <!-- Identity -->
+  <h2>Identity</h2>
+
+  <div class="field">
+    <label>PGP Fingerprint (40 characters)</label>
+    <input type="text" class="fingerprint-input" id="fingerprint"
+           placeholder="CCBE9306410CF8CD5E393D6DEC31663B95230684"
+           maxlength="40" spellcheck="false" autocomplete="off">
+    <div class="field-hint">Your PGP key fingerprint. Run <code>gpg --list-keys</code> to find it.</div>
+  </div>
+
+  <!-- Service -->
+  <h2>Service</h2>
+
+  <div class="field">
+    <label>Default CapAuth Service URL</label>
+    <input type="url" id="service-url"
+           placeholder="https://auth.skworld.io">
+    <div class="field-hint">Base URL of the CapAuth verification service to authenticate against.</div>
+  </div>
+
+  <!-- Private Key -->
+  <h2>Private Key</h2>
+
+  <div class="security-notice">
+    Your private key is stored in the browser's local storage. For maximum security,
+    consider using a hardware token (YubiKey) instead. The key never leaves this
+    extension and is never transmitted to any server.
+  </div>
+
+  <div class="field">
+    <label>ASCII-Armored PGP Private Key</label>
+    <textarea id="private-key"
+              placeholder="-----BEGIN PGP PRIVATE KEY BLOCK-----&#10;&#10;Paste your armored private key here...&#10;&#10;-----END PGP PRIVATE KEY BLOCK-----"
+              rows="8" spellcheck="false" autocomplete="off"></textarea>
+    <div class="field-hint">Used for signing challenge nonces. Will be replaced by OpenPGP.js key management.</div>
+  </div>
+
+  <div class="field">
+    <label>ASCII-Armored PGP Public Key (for enrollment)</label>
+    <textarea id="public-key"
+              placeholder="-----BEGIN PGP PUBLIC KEY BLOCK-----&#10;&#10;Paste your armored public key here...&#10;&#10;-----END PGP PUBLIC KEY BLOCK-----"
+              rows="6" spellcheck="false" autocomplete="off"></textarea>
+    <div class="field-hint">Sent to the service on first login for key enrollment.</div>
+  </div>
+
+  <!-- Behavior -->
+  <h2>Behavior</h2>
+
+  <div class="toggle-row">
+    <div>
+      <div class="toggle-label">Auto-sign challenges</div>
+      <div class="toggle-desc">Automatically sign and respond when a CapAuth login page is detected</div>
+    </div>
+    <label class="toggle">
+      <input type="checkbox" id="auto-sign">
+      <span class="toggle-slider"></span>
+    </label>
+  </div>
+
+  <!-- Actions -->
+  <div class="btn-row">
+    <button class="btn btn-primary" id="btn-save">Save Settings</button>
+    <button class="btn btn-danger" id="btn-clear">Clear All Data</button>
+  </div>
+
+  <div class="save-status" id="save-status">Settings saved</div>
+
+  <!-- About -->
+  <div class="about">
+    <strong>CapAuth - Sovereign Login</strong> v0.1.0<br>
+    One-click passwordless PGP authentication. No passwords. No third parties. Your key is your identity.<br><br>
+    Part of the <a href="https://skworld.io" target="_blank">SKWorld</a> sovereign ecosystem.<br>
+    <a href="https://capauth.io" target="_blank">capauth.io</a> |
+    <a href="https://smilintux.org/join" target="_blank">smilintux.org</a>
+  </div>
+
+  <script src="options.js"></script>
+</body>
+</html>

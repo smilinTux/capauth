@@ -1,14 +1,71 @@
-FROM ghcr.io/goauthentik/server:2025.12.3
+# ──────────────────────────────────────────────────────────────────────
+#  Custom Authentik image with CapAuth PGP passwordless stage
+#  Adds: Python backend (Django app) + Lit web component (frontend)
+#
+#  Build:
+#    docker build -f Dockerfile.authentik-capauth \
+#      -t skgit.skstack01.douno.it/skadmin/authentik-capauth:2025.12.3 .
+#
+#  Push:
+#    docker push skgit.skstack01.douno.it/skadmin/authentik-capauth:2025.12.3
+# ──────────────────────────────────────────────────────────────────────
+ARG AK_VERSION=2025.12.3
 
-# Install capauth into the Authentik server image so the custom stage
-# models, views, and migrations are available inside Django.
+# ── Stage 1: Rebuild Authentik frontend with ak-stage-capauth ────────
+FROM node:24-bookworm AS web-builder
+
+ARG AK_VERSION
+WORKDIR /build
+
+# Clone Authentik source (shallow, single branch)
+RUN apt-get update && apt-get install -y --no-install-recommends git && \
+    git clone --depth 1 --branch version/${AK_VERSION} \
+      https://github.com/goauthentik/authentik.git /build/authentik && \
+    rm -rf /build/authentik/.git
+
+WORKDIR /build/authentik/web
+
+# Install web dependencies
+# Use npm install (not ci) because the lockfile may need regeneration
+# after adding the capauth stage component
+RUN npm install --ignore-engines 2>&1 || npm install --legacy-peer-deps 2>&1
+
+# Copy CapAuth stage web component into the Authentik web tree
+COPY web/stages/capauth/ /build/authentik/web/src/flow/stages/capauth/
+
+# Register the component in the flow entrypoint
+RUN echo '' >> src/flow/index.entrypoint.ts && \
+    echo '// CapAuth PGP passwordless stage' >> src/flow/index.entrypoint.ts && \
+    echo 'import "#flow/stages/capauth/CapAuthStage";' >> src/flow/index.entrypoint.ts
+
+# Build the frontend (esbuild via npm run build)
+RUN npm run build
+
+# ── Stage 2: Final custom Authentik image ────────────────────────────
+FROM ghcr.io/goauthentik/server:${AK_VERSION}
+
 USER root
 
-# Copy capauth source into the image and install in editable mode.
-# Adjust this path if you build from a mono-repo.
+# Install capauth into Authentik's venv.
+# Most deps (pydantic, httpx, click, etc.) already exist in the venv.
+# Only PGPy is missing. Install --no-deps first, then add PGPy.
 COPY . /app/capauth
-RUN pip install --no-cache-dir -e /app/capauth
+ENV PIP_TARGET=/ak-root/.venv/lib/python3.13/site-packages
+RUN pip install --no-cache-dir --no-deps /app/capauth && \
+    pip install --no-cache-dir PGPy
 
-# Drop privileges back to the default Authentik user.
+# Copy rebuilt frontend (overwrite stock flow interface bundle)
+COPY --from=web-builder /build/authentik/web/dist/ /web/dist/
+
+# Add Django app registration via Authentik's user_settings hook
+# Authentik loads this at startup: _update_settings("data.user_settings")
+COPY authentik-custom/user_settings.py /data/user_settings.py
+
+# Add lifecycle hook for auto-migration on startup
+COPY authentik-custom/capauth_migrate.py /lifecycle/system_migrations/capauth_migrate.py
+
+# Fix permissions (authentik runs as uid 1000)
+RUN chown 1000:1000 /data/user_settings.py && \
+    chmod 644 /data/user_settings.py /lifecycle/system_migrations/capauth_migrate.py
+
 USER authentik
-

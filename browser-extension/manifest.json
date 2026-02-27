@@ -1,0 +1,64 @@
+{
+  "manifest_version": 3,
+  "name": "CapAuth - Sovereign Login",
+  "short_name": "CapAuth",
+  "version": "0.1.0",
+  "description": "One-click passwordless PGP login for sovereign services",
+  "author": "smilinTux",
+  "homepage_url": "https://capauth.io",
+
+  "permissions": [
+    "activeTab",
+    "storage",
+    "scripting",
+    "alarms"
+  ],
+
+  "host_permissions": [
+    "https://*.capauth.io/*",
+    "https://*.skworld.io/*"
+  ],
+
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+
+  "content_scripts": [
+    {
+      "matches": [
+        "https://*.capauth.io/*",
+        "https://*.skworld.io/*"
+      ],
+      "js": [
+        "content_scripts/detector.js"
+      ],
+      "run_at": "document_idle"
+    }
+  ],
+
+  "action": {
+    "default_popup": "popup/popup.html",
+    "default_title": "CapAuth - Sovereign Login",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    }
+  },
+
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
+
+  "options_page": "options/options.html",
+
+  "web_accessible_resources": [
+    {
+      "resources": ["icons/*"],
+      "matches": ["<all_urls>"]
+    }
+  ]
+}

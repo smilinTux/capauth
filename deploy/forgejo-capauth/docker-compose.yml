@@ -1,0 +1,62 @@
+# CapAuth + Forgejo — Passwordless PGP Login for Sovereign Git
+#
+# Quick start:
+#   1. Generate Forgejo config:  capauth setup forgejo --capauth-url http://capauth:8420
+#   2. Copy the output to forgejo/conf/app.ini
+#   3. docker compose up -d
+#   4. Visit http://localhost:3000 and click "Sign in with CapAuth"
+#
+# For production, set proper secrets and use Traefik/nginx for TLS.
+
+services:
+  # ── CapAuth Verification Service ──────────────────────────────────
+  capauth:
+    image: ghcr.io/smilintux/capauth:latest
+    build:
+      context: ../../
+      dockerfile: Dockerfile
+    ports:
+      - "8420:8420"
+    environment:
+      CAPAUTH_SERVICE_ID: capauth.local
+      CAPAUTH_BASE_URL: http://localhost:8420
+      CAPAUTH_ADMIN_TOKEN: ${CAPAUTH_ADMIN_TOKEN:-change-me-admin-token}
+      CAPAUTH_REQUIRE_APPROVAL: "false"
+      CAPAUTH_DB_PATH: /data/keys.db
+      CAPAUTH_JWT_SECRET: ${CAPAUTH_JWT_SECRET:-change-me-jwt-secret-at-least-32-chars}
+    volumes:
+      - capauth_data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8420/capauth/v1/status"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    restart: unless-stopped
+
+  # ── Forgejo (Sovereign Git) ───────────────────────────────────────
+  forgejo:
+    image: codeberg.org/forgejo/forgejo:9
+    ports:
+      - "3000:3000"
+      - "222:22"
+    environment:
+      USER_UID: 1000
+      USER_GID: 1000
+      FORGEJO__database__DB_TYPE: sqlite3
+      FORGEJO__database__PATH: /data/gitea/forgejo.db
+      FORGEJO__server__DOMAIN: localhost
+      FORGEJO__server__ROOT_URL: http://localhost:3000/
+      FORGEJO__server__SSH_PORT: 222
+      # Enable OIDC
+      FORGEJO__oauth2__ENABLE: "true"
+    volumes:
+      - forgejo_data:/data
+      - ./forgejo/conf:/data/gitea/conf
+    depends_on:
+      capauth:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  capauth_data:
+  forgejo_data:

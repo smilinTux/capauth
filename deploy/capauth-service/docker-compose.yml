@@ -1,0 +1,51 @@
+# CapAuth Verification Service — standalone deployment
+#
+# Deploys the capauth-service on port 8420.
+# No dependency on Authentik or any upstream IdP.
+# Any OIDC consumer can point at this service.
+#
+# Quick start:
+#   1. cp .env.example .env
+#   2. Edit .env (admin token, JWT secret, optional server key)
+#   3. docker compose up -d
+#   4. curl http://localhost:8420/capauth/v1/status
+#
+# To enroll your key:
+#   capauth-service enroll --fingerprint YOUR_FP --public-key ~/.capauth/identity/public.asc
+
+services:
+  capauth:
+    image: ghcr.io/smilintux/capauth:latest
+    build:
+      context: ../../
+      dockerfile: Dockerfile
+    ports:
+      - "${CAPAUTH_PORT:-8420}:8420"
+    environment:
+      CAPAUTH_SERVICE_ID: ${CAPAUTH_SERVICE_ID:-capauth.local}
+      CAPAUTH_BASE_URL: ${CAPAUTH_BASE_URL:-http://localhost:8420}
+      CAPAUTH_ADMIN_TOKEN: ${CAPAUTH_ADMIN_TOKEN:?Set CAPAUTH_ADMIN_TOKEN in .env}
+      CAPAUTH_JWT_SECRET: ${CAPAUTH_JWT_SECRET:?Set CAPAUTH_JWT_SECRET in .env}
+      CAPAUTH_REQUIRE_APPROVAL: ${CAPAUTH_REQUIRE_APPROVAL:-false}
+      CAPAUTH_DB_PATH: /data/keys.db
+      # Optional: server PGP key for signing nonces
+      # CAPAUTH_SERVER_KEY_ARMOR: <base64-of-armored-private-key>
+      # CAPAUTH_SERVER_KEY_PASSPHRASE: <passphrase>
+    volumes:
+      - capauth_data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8420/capauth/v1/status"]
+      interval: 30s
+      timeout: 5s
+      start_period: 10s
+      retries: 3
+    restart: unless-stopped
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  capauth_data:
+    driver: local

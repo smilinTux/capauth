@@ -494,15 +494,77 @@ Emotional AI without identity verification is dangerous at scale. One rogue clon
 
 ## Install
 
+All SK\* packages install via a shared virtual environment at `~/.skenv/`.
+
 ```bash
-pip install capauth
+# Via SK* suite installer (recommended)
+bash path/to/skcapstone/scripts/install.sh
+
+# Or standalone:
+python3 -m venv ~/.skenv
+~/.skenv/bin/pip install capauth[all]
+export PATH="$HOME/.skenv/bin:$PATH"
 ```
+
+Add the `PATH` export to your shell profile (`~/.bashrc` or `~/.zshrc`) to make it permanent.
 
 Or from source:
 ```bash
 git clone https://github.com/smilinTux/capauth.git
 cd capauth
-pip install -e ".[dev]"
+~/.skenv/bin/pip install -e ".[dev]"
+```
+
+---
+
+## Decentralized Identity (DID)
+
+CapAuth generates W3C-compliant DID documents across three privacy tiers — choose the right tier for each context.
+
+### Three-Tier DID Model
+
+| Tier | Method | Scope | Contents |
+|------|--------|-------|----------|
+| **Tier 1** | `did:key` | Self-contained, zero infrastructure | Public key JWK only |
+| **Tier 2** | `did:web` (mesh) | Tailscale-private | Full service endpoints + agent card |
+| **Tier 3** | `did:web` (public) | `skworld.io`, public internet | Minimal: key + name + org |
+
+**Tier 1 — did:key** (zero infrastructure)
+
+The DID IS the key. No servers, no hosting, no DNS. Stored locally at
+`~/.skcapstone/did/key.json`.
+
+```bash
+capauth did generate --tier key
+```
+
+**Tier 2 — did:web mesh** (Tailscale-private)
+
+Full service endpoints accessible only within the Tailscale mesh. Served via
+Tailscale Serve at `~/.skcomm/well-known/did.json`. Never exposes 100.x.x.x
+IPs — uses the Tailscale magic-DNS hostname only.
+
+```bash
+capauth did generate --tier mesh --tailnet-hostname opus-node --tailnet-name tailnet-xyz.ts.net
+```
+
+**Tier 3 — did:web public** (skworld.io)
+
+Minimal public document with only the public key JWK, name, and org affiliation.
+Published to Cloudflare KV and resolvable as
+`did:web:ws.weblink.skworld.io:agents:<slug>`.
+
+```bash
+capauth did generate --tier public
+# Then publish:
+bash scripts/publish-did.sh
+```
+
+Opt out of public publishing at any time:
+
+```yaml
+# ~/.capauth/config.yaml
+publish_to_skworld: false
 ```
 
 ---
@@ -510,24 +572,25 @@ pip install -e ".[dev]"
 ## Quick Start
 
 ```bash
-# 1. Create your sovereign profile
+# 1. Install (via venv)
+python3 -m venv ~/.skenv && ~/.skenv/bin/pip install capauth[all]
+export PATH="$HOME/.skenv/bin:$PATH"
+
+# 2. Create your sovereign profile
 capauth init --name "Chef" --email "admin@smilintux.org"
-# → Generates PGP keypair
+# → Generates PGP keypair (RSA-4096 by default)
 # → Creates sovereign profile at ~/.capauth/
 
-# 2. Designate your AI advocate
-capauth advocate set --name "Lumina" --pubkey lumina.pub.asc
-# → Lumina can now manage access on your behalf
+# 3. Export your public key to share with peers
+capauth export-pubkey -o chef.pub.asc
 
-# 3. Share your public profile
-capauth profile publish --to ipfs
-# → Profile (public key + metadata) pinned to IPFS
-# → Shareable link: ipfs://Qm.../chef-profile.json
+# 4. Verify your profile integrity
+capauth profile verify
 
-# 4. Start receiving requests
-capauth daemon start
-# → Listens for incoming access requests
-# → AI advocate evaluates and routes
+# 5. Generate your DID documents
+capauth did generate --tier key     # Tier 1: self-contained
+capauth did generate --tier mesh    # Tier 2: Tailscale mesh
+capauth did generate --tier public  # Tier 3: public (skworld.io)
 ```
 
 ---
@@ -544,15 +607,55 @@ The chains are broken. Not through violence. Through sovereignty, encryption, de
 
 ---
 
+## Key CLI Commands
+
+```bash
+# Identity
+capauth init --name "Chef" --email "admin@smilintux.org"   # Create sovereign profile
+capauth profile show                                         # Display profile
+capauth profile verify                                       # Verify PGP signature integrity
+capauth export-pubkey [-o chef.pub.asc]                     # Export ASCII-armored public key
+
+# Verification
+capauth verify --pubkey peer.pub.asc                        # Challenge-response with a peer
+
+# DID management
+capauth did generate --tier key                             # Tier 1: did:key
+capauth did generate --tier mesh --tailnet-hostname <host>  # Tier 2: did:web mesh
+capauth did generate --tier public                          # Tier 3: did:web public
+
+# Authentication
+capauth login <service_url>                                  # Authenticate to a service
+capauth login <service_url> --no-claims                     # Anonymous (fingerprint only)
+
+# Peer mesh
+capauth mesh discover                                        # Discover peers on network
+capauth mesh peers [--verified]                              # List known peers
+capauth mesh announce                                        # Announce presence
+
+# PMA membership (Fiducia Communitatis)
+capauth pma request --reason "..."                          # Request membership
+capauth pma status                                           # Show membership status
+capauth pma verify <claim.json>                             # Verify a claim
+capauth pma approve <request_id>                            # Approve request (steward)
+
+# Registration
+capauth register --org smilintux --name "Chef" --title King # Register with an org
+
+# Integration
+capauth setup forgejo --capauth-url https://capauth.skworld.io  # Generate Forgejo config
+```
+
 ## Documentation
 
 | Document | Description |
 |----------|-------------|
-| [Developer Quickstart](../docs/QUICKSTART.md) | Install + first sovereign agent in 5 minutes |
-| [API Reference](../docs/API.md) | Full API docs for CapAuth and all core packages |
-| [PMA Integration](../docs/PMA_INTEGRATION.md) | Legal sovereignty layer (Fiducia Communitatis) |
+| [Architecture](docs/ARCHITECTURE.md) | System architecture with mermaid diagrams |
 | [Crypto Spec](docs/CRYPTO_SPEC.md) | PGP implementation, key management, challenge-response |
+| [Protocol](docs/PROTOCOL.md) | CapAuth wire protocol specification |
+| [Claims](docs/CLAIMS.md) | Capability claims and token format |
 | [AI Advocate](AI-ADVOCATE.md) | How AI advocates protect your sovereignty |
+| [Integration Blueprint](docs/INTEGRATION_BLUEPRINT.md) | Third-party integration guide |
 
 ## License
 

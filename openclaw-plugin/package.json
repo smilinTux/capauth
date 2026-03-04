@@ -1,0 +1,33 @@
+{
+  "name": "capauth-openclaw-plugin",
+  "version": "0.1.0",
+  "description": "OpenClaw plugin for CapAuth — Sovereign Identity & PMA Authentication",
+  "main": "src/index.ts",
+  "type": "module",
+  "openclaw": {
+    "plugin": {
+      "name": "capauth",
+      "version": "0.1.0",
+      "displayName": "CapAuth",
+      "description": "Sovereign identity, PMA membership, and mesh peer authentication",
+      "author": "smilinTux Team",
+      "license": "AGPL-3.0",
+      "category": "identity",
+      "permissions": ["read"],
+      "commands": [
+        "capauth:profile",
+        "capauth:verify",
+        "capauth:pma-status",
+        "capauth:mesh-peers",
+        "capauth:mesh-status",
+        "capauth:mesh-discover"
+      ]
+    }
+  },
+  "peerDependencies": {
+    "openclaw": ">=1.0.0"
+  },
+  "keywords": ["openclaw", "openclaw-plugin", "capauth", "identity", "pma", "sovereign"],
+  "author": "smilinTux Team",
+  "license": "AGPL-3.0"
+}

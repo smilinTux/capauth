@@ -1,0 +1,10 @@
+{
+  "id": "capauth",
+  "name": "CapAuth",
+  "description": "Sovereign identity and PMA authentication — profiles, verification, mesh networking, and peer discovery via the capauth CLI.",
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {}
+  }
+}

@@ -1,3 +1,10 @@
+---
+name: capauth
+emoji: "\U0001F511"
+description: PGP-based decentralized identity and authentication — sovereign identity verification without OAuth or centralized login.
+metadata: {"clawdbot":{"requires":{"bins":["capauth"]},"install":[{"id":"pipx","kind":"shell","command":"pipx install 'capauth[all]'","bins":["capauth","capauth-service"],"label":"Install capauth (pipx)"}]}}
+---
+
 # CapAuth Skill
 
 **SKILL.md — Capability-based Authentication**

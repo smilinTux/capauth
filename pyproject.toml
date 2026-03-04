@@ -73,6 +73,9 @@ Changelog = "https://github.com/smilinTux/capauth/releases"
 [tool.setuptools.packages.find]
 where = ["src"]
 
+[tool.setuptools.package-data]
+capauth = ["SKILL.md"]
+
 [tool.black]
 line-length = 99
 target-version = ["py310"]

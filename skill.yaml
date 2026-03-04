@@ -1,0 +1,30 @@
+name: capauth
+version: "0.1.0"
+description: >
+  Sovereign PGP identity and authentication. DID document generation,
+  CapAuth bearer tokens, challenge-response verification, and trust
+  graph management. The identity root for all sovereign agents.
+
+author:
+  name: smilinTux.org
+  email: hello@smilintux.org
+
+tags: [identity, pgp, auth, did, trust, sovereign, capauth]
+category: core
+
+tools:
+  - name: capauth_verify
+    description: Verify a CapAuth bearer token and return the identity
+    entrypoint: capauth.skill:verify_token
+
+  - name: capauth_create_challenge
+    description: Create a PGP challenge for identity verification
+    entrypoint: capauth.skill:create_challenge
+
+  - name: capauth_verify_challenge
+    description: Verify a challenge response and confirm identity
+    entrypoint: capauth.skill:verify_challenge
+
+  - name: capauth_whoami
+    description: Return the current agent identity from local CapAuth profile
+    entrypoint: capauth.skill:whoami

@@ -1,0 +1,38 @@
+<?xml version="1.0"?>
+<info xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+      xsi:noNamespaceSchemaLocation="https://apps.nextcloud.com/schema/apps/info.xsd">
+    <id>capauth</id>
+    <name>CapAuth</name>
+    <summary>Passwordless PGP authentication for Nextcloud</summary>
+    <description><![CDATA[
+        CapAuth lets you sign in to Nextcloud using your sovereign PGP key.
+        No passwords. No OAuth flows. Just cryptographic proof of identity.
+
+        Features:
+        - Two-factor authentication via PGP challenge-response
+        - Bearer token authentication for API requests
+        - Auto-provisioning of users from CapAuth identity claims
+        - Group synchronisation: CapAuth teams → Nextcloud groups
+    ]]></description>
+    <version>0.2.0</version>
+    <licence>agpl</licence>
+    <author mail="hello@capauth.io">SKWorld</author>
+    <namespace>CapAuth</namespace>
+    <category>security</category>
+    <bugs>https://github.com/smilintux/capauth/issues</bugs>
+    <dependencies>
+        <php min-version="8.1"/>
+        <nextcloud min-version="27" max-version="30"/>
+    </dependencies>
+    <two-factor-providers>
+        <provider>OCA\CapAuth\Provider\CapAuthProvider</provider>
+    </two-factor-providers>
+    <background-jobs>
+        <job>OCA\CapAuth\BackgroundJob\PruneExpiredNonces</job>
+    </background-jobs>
+    <settings>
+        <admin>OCA\CapAuth\Settings\AdminSettings</admin>
+        <admin-section>OCA\CapAuth\Settings\AdminSection</admin-section>
+    </settings>
+    <navigations/>
+</info>

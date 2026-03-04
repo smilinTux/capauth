@@ -1,0 +1,150 @@
+/* CapAuth Nextcloud login styles */
+
+.capauth-login-body {
+    background: var(--color-main-background, #f2f2f2);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 100vh;
+    margin: 0;
+    font-family: var(--font-face, sans-serif);
+}
+
+.capauth-login-box {
+    background: var(--color-main-background, #fff);
+    border-radius: 12px;
+    box-shadow: 0 2px 16px rgba(0,0,0,.12);
+    padding: 40px 36px;
+    max-width: 520px;
+    width: 100%;
+    box-sizing: border-box;
+}
+
+.capauth-logo {
+    text-align: center;
+    margin-bottom: 28px;
+}
+
+.capauth-logo h1 {
+    font-size: 1.6rem;
+    font-weight: 700;
+    margin: 10px 0 4px;
+    color: var(--color-main-text, #222);
+}
+
+.capauth-tagline {
+    color: var(--color-text-lighter, #666);
+    margin: 0 0 20px;
+    font-size: .95rem;
+}
+
+.capauth-input {
+    width: 100%;
+    padding: 10px 14px;
+    border: 1px solid var(--color-border, #ccc);
+    border-radius: 6px;
+    font-size: 1rem;
+    font-family: monospace;
+    box-sizing: border-box;
+    margin-bottom: 10px;
+    background: var(--color-main-background, #fff);
+    color: var(--color-main-text, #222);
+}
+
+.capauth-input:focus {
+    outline: none;
+    border-color: var(--color-primary, #006aa3);
+    box-shadow: 0 0 0 2px var(--color-primary-light, rgba(0,106,163,.15));
+}
+
+.capauth-textarea {
+    width: 100%;
+    padding: 10px 14px;
+    border: 1px solid var(--color-border, #ccc);
+    border-radius: 6px;
+    font-family: monospace;
+    font-size: .82rem;
+    box-sizing: border-box;
+    resize: vertical;
+    background: var(--color-main-background, #fff);
+    color: var(--color-main-text, #222);
+}
+
+.capauth-challenge-box {
+    background: var(--color-background-dark, #f5f5f5);
+    border: 1px solid var(--color-border, #ddd);
+    border-radius: 6px;
+    padding: 14px;
+    margin: 16px 0;
+}
+
+.capauth-challenge-box label {
+    display: block;
+    font-size: .8rem;
+    color: var(--color-text-lighter, #666);
+    margin-bottom: 6px;
+    text-transform: uppercase;
+    letter-spacing: .05em;
+}
+
+.capauth-mono {
+    font-family: monospace;
+    font-size: .82rem;
+    white-space: pre-wrap;
+    word-break: break-all;
+    margin: 0 0 8px;
+    color: var(--color-main-text, #222);
+}
+
+.capauth-error {
+    color: var(--color-error, #c0392b);
+    font-size: .9rem;
+    margin: 6px 0;
+}
+
+.capauth-hint {
+    color: var(--color-text-lighter, #666);
+    font-size: .88rem;
+    margin: 8px 0;
+}
+
+.capauth-extension-active {
+    color: var(--color-success, #2ecc71);
+    font-weight: 600;
+}
+
+.capauth-back {
+    text-align: center;
+    margin-top: 24px;
+    font-size: .9rem;
+}
+
+.capauth-back a {
+    color: var(--color-text-lighter, #666);
+    text-decoration: none;
+}
+
+.capauth-back a:hover {
+    color: var(--color-primary, #006aa3);
+}
+
+.button.primary {
+    background: var(--color-primary, #006aa3);
+    color: #fff;
+    border: none;
+    border-radius: 6px;
+    padding: 10px 20px;
+    font-size: 1rem;
+    cursor: pointer;
+    width: 100%;
+    margin-top: 8px;
+}
+
+.button.primary:hover {
+    background: var(--color-primary-hover, #004f80);
+}
+
+.button.primary:disabled {
+    opacity: .6;
+    cursor: default;
+}

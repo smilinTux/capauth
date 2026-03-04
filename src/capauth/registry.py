@@ -49,6 +49,9 @@ class RegistryEntry(BaseModel):
         motto: Personal motto or tagline.
         pronouns: Optional pronouns.
         email: Contact email.
+        publish_to_skworld: Whether to publish DID to skworld.io (default: True).
+            Set to False to opt out of public DID publishing while keeping
+            local identity and mesh-private DID documents.
     """
 
     title: str = "King"
@@ -67,6 +70,7 @@ class RegistryEntry(BaseModel):
     motto: Optional[str] = None
     pronouns: Optional[str] = None
     email: Optional[str] = None
+    publish_to_skworld: bool = True
 
     def to_yaml(self) -> str:
         """Serialize the entry to YAML matching the kingdom registry format.
@@ -98,6 +102,8 @@ class RegistryEntry(BaseModel):
             data["pronouns"] = self.pronouns
         if self.motto:
             data["motto"] = self.motto
+        if not self.publish_to_skworld:
+            data["publish_to_skworld"] = False
 
         return "---\n" + yaml.dump(data, default_flow_style=False, sort_keys=False) + "---\n"
 

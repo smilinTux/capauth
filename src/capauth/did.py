@@ -57,6 +57,7 @@ class DIDContext:
     capabilities: list[str] = field(default_factory=list)
     vibe: Optional[str] = None
     core_traits: list[str] = field(default_factory=list)
+    publish_to_skworld: bool = True  # opt-out flag for public DID publishing
 
 
 # ---------------------------------------------------------------------------
@@ -284,6 +285,21 @@ class DIDDocumentGenerator:
             except Exception:
                 pass
 
+        # Load publish_to_skworld preference from config or registry entry.
+        # Default is True (opt-in to public publishing for full transparency).
+        # Users can set publish_to_skworld: false in ~/.capauth/config.yaml
+        # or in their registry entry to opt out of public DID publishing.
+        publish_to_skworld = True
+        config_path = base / "config.yaml"
+        if config_path.exists():
+            try:
+                import yaml as _yaml
+                cfg = _yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
+                if "publish_to_skworld" in cfg:
+                    publish_to_skworld = bool(cfg["publish_to_skworld"])
+            except Exception:
+                pass
+
         ctx = DIDContext(
             fingerprint=profile.key_info.fingerprint,
             name=profile.entity.name,
@@ -295,6 +311,7 @@ class DIDDocumentGenerator:
             capabilities=capabilities,
             vibe=vibe,
             core_traits=core_traits,
+            publish_to_skworld=publish_to_skworld,
         )
         return cls(ctx)
 
@@ -332,6 +349,12 @@ class DIDDocumentGenerator:
         if tier == DIDTier.WEB_MESH:
             return self._generate_mesh_did(ctx, tailnet_hostname, tailnet_name, slug)
         if tier == DIDTier.WEB_PUBLIC:
+            if not ctx.publish_to_skworld:
+                logger.info(
+                    "Skipping public DID generation — publish_to_skworld is disabled. "
+                    "Set publish_to_skworld: true in ~/.capauth/config.yaml to re-enable."
+                )
+                return {"opted_out": True, "tier": "public", "reason": "publish_to_skworld=false"}
             return self._generate_public_did(ctx, org_domain, slug)
         raise ValueError(f"Unknown DID tier: {tier!r}")
 
@@ -354,11 +377,16 @@ class DIDDocumentGenerator:
             org_domain=org_domain,
             agent_slug=agent_slug,
         )
-        return {
+        result = {
             DIDTier.KEY: self.generate(DIDTier.KEY, **kw),
             DIDTier.WEB_MESH: self.generate(DIDTier.WEB_MESH, **kw),
-            DIDTier.WEB_PUBLIC: self.generate(DIDTier.WEB_PUBLIC, **kw),
         }
+        # Only include public DID if not opted out
+        if self._ctx.publish_to_skworld:
+            result[DIDTier.WEB_PUBLIC] = self.generate(DIDTier.WEB_PUBLIC, **kw)
+        else:
+            logger.info("Public DID (Tier 3) skipped — publish_to_skworld is disabled")
+        return result
 
     def generate_identity_card(self, include_soul: bool = True) -> dict:
         """Generate a full sovereign identity card.

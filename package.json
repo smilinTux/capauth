@@ -1,6 +1,6 @@
 {
   "name": "@smilintux/capauth",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "CapAuth - Sovereign capability-based authentication protocol for AI agents and humans.",
   "main": "index.js",
   "types": "index.d.ts",

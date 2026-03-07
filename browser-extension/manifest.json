@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "CapAuth - Sovereign Login",
   "short_name": "CapAuth",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "One-click passwordless PGP login for sovereign services",
   "author": "smilinTux",
   "homepage_url": "https://capauth.io",

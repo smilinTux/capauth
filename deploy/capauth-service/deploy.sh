@@ -27,8 +27,9 @@ if [[ ! -f "$SCRIPT_DIR/.env" ]]; then
     # Generate random secrets
     ADMIN_TOKEN=$(python3 -c "import secrets; print(secrets.token_hex(24))")
     JWT_SECRET=$(python3 -c "import secrets; print(secrets.token_hex(32))")
-    sed -i "s/change-me-admin-token-min-32-chars/$ADMIN_TOKEN/" "$SCRIPT_DIR/.env"
-    sed -i "s/change-me-jwt-secret-at-least-32-chars/$JWT_SECRET/" "$SCRIPT_DIR/.env"
+    sed -i.bak "s/change-me-admin-token-min-32-chars/$ADMIN_TOKEN/" "$SCRIPT_DIR/.env"
+    sed -i.bak "s/change-me-jwt-secret-at-least-32-chars/$JWT_SECRET/" "$SCRIPT_DIR/.env"
+    rm -f "$SCRIPT_DIR/.env.bak"
     green "✓ Generated .env with random secrets"
 fi
 

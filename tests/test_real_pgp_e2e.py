@@ -93,8 +93,8 @@ def _gnupg_verify(data: bytes, sig_armor: str, pub_armor: str) -> bool:
 # ---------------------------------------------------------------------------
 
 requires_opus_key = pytest.mark.skipif(
-    not _has_opus_key(),
-    reason="Opus signing key not found in system GPG keyring",
+    gnupg is None or not Path("~/.gnupg").expanduser().is_dir() or not _has_opus_key(),
+    reason="Opus signing key not found in system GPG keyring or gnupg unavailable",
 )
 
 

@@ -2,9 +2,8 @@
 
 from __future__ import annotations
 
-import hashlib
 import base64
-import time
+import hashlib
 
 import jwt
 import pytest

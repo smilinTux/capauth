@@ -13,8 +13,8 @@ config         : Configuration dataclass with env-var loading.
 cli            : ``capauth forgejo`` CLI subcommands.
 """
 
-from .config import ForgejoConfig
 from .auth_flow import ForgejoAuthFlow
+from .config import ForgejoConfig
 from .forgejo_api import ForgejoAPIClient
 
 __all__ = ["ForgejoConfig", "ForgejoAuthFlow", "ForgejoAPIClient"]

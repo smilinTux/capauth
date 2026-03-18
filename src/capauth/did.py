@@ -154,8 +154,13 @@ def _rsa_numbers_to_der(n: int, e: int) -> bytes:
         DER-encoded SubjectPublicKeyInfo bytes.
     """
     from cryptography.hazmat.backends import default_backend  # type: ignore[import]
-    from cryptography.hazmat.primitives.asymmetric.rsa import RSAPublicNumbers  # type: ignore[import]
-    from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat  # type: ignore[import]
+    from cryptography.hazmat.primitives.asymmetric.rsa import (
+        RSAPublicNumbers,  # type: ignore[import]
+    )
+    from cryptography.hazmat.primitives.serialization import (  # type: ignore[import]
+        Encoding,
+        PublicFormat,
+    )
 
     pub_key = RSAPublicNumbers(e=e, n=n).public_key(default_backend())
     return pub_key.public_bytes(Encoding.DER, PublicFormat.SubjectPublicKeyInfo)

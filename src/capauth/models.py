@@ -96,6 +96,6 @@ class ChallengeResponse(BaseModel):
 # Django models for Authentik custom stage (loaded only when Django is available).
 # Ensures CapAuthStage and CapAuthKeyRegistry are discovered when "capauth" is in INSTALLED_APPS.
 try:
-    from capauth.authentik.stage import CapAuthStage, CapAuthKeyRegistry  # noqa: F401
+    from capauth.authentik.stage import CapAuthKeyRegistry, CapAuthStage  # noqa: F401
 except ImportError:
     pass

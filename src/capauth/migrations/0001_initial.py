@@ -2,8 +2,8 @@
 # Requires Authentik's authentik_flows app (Stage model) to be installed.
 # Run inside Authentik environment: python manage.py migrate capauth
 
-from django.db import migrations, models
 import django.db.models.deletion
+from django.db import migrations, models
 
 
 class Migration(migrations.Migration):

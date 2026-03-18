@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import os
-
 import pytest
 
 from capauth.integrations.forgejo.config import ForgejoConfig

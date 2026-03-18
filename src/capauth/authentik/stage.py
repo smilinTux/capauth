@@ -33,10 +33,10 @@ import logging
 import os
 import uuid
 from datetime import datetime, timezone
-from typing import Any, Optional
+from typing import Any
 
 from .claims_mapper import map_claims, preferred_username_fallback
-from .nonce_store import consume, issue, peek
+from .nonce_store import consume, issue
 from .verifier import (
     canonical_claims_payload,
     canonical_nonce_payload,
@@ -50,11 +50,6 @@ logger = logging.getLogger("capauth.authentik.stage")
 # --- Django / Authentik imports (optional at module level so the file
 #     is importable in test environments without a full Authentik stack) ---
 try:
-    from django.db import models
-    from django.http import HttpResponse
-    from django.utils.translation import gettext_lazy as _
-    from rest_framework.fields import BooleanField, CharField, DictField
-
     from authentik.flows.challenge import (
         Challenge,
         ChallengeResponse,
@@ -63,6 +58,9 @@ try:
     from authentik.flows.models import Stage
     from authentik.flows.planner import PLAN_CONTEXT_PENDING_USER
     from authentik.flows.stage import ChallengeStageView
+    from django.db import models
+    from django.http import HttpResponse
+    from rest_framework.fields import BooleanField, CharField, DictField
 
     _AUTHENTIK_AVAILABLE = True
 except ImportError:
@@ -556,7 +554,7 @@ if _AUTHENTIK_AVAILABLE:
 
             from django.contrib.auth import get_user_model
 
-            User = get_user_model()
+            User = get_user_model()  # noqa: N806
             effective_fp = key_record.effective_fingerprint
             user, created = User.objects.get_or_create(username=effective_fp)
             display_name = oidc_claims.get("name", preferred_username_fallback(effective_fp))

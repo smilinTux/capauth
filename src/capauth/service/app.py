@@ -21,7 +21,6 @@ import logging
 import os
 import secrets
 import time
-import urllib.parse
 from pathlib import Path
 from typing import Any, Optional
 
@@ -29,11 +28,10 @@ import httpx
 import jwt
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field
 
-from ..authentik.claims_mapper import map_claims, preferred_username_fallback
-from ..authentik.nonce_store import consume, issue, peek
+from ..authentik.nonce_store import issue, peek
 from ..authentik.stage import build_challenge, verify_auth_response
 from ..authentik.verifier import fingerprint_from_armor
 from .keystore import KeyStore

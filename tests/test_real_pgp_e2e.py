@@ -19,7 +19,17 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-import gnupg
+
+try:
+    import gnupg
+except ImportError:
+    gnupg = None
+
+# Skip entire module if gnupg is not available or gnupg home doesn't exist
+pytestmark = pytest.mark.skipif(
+    gnupg is None or not Path("~/.gnupg").expanduser().is_dir(),
+    reason="python-gnupg not installed or ~/.gnupg does not exist",
+)
 
 # ---------------------------------------------------------------------------
 # Constants

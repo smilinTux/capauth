@@ -27,13 +27,12 @@ GET  /forgejo/.well-known/openid-configuration   OIDC discovery override for For
 from __future__ import annotations
 
 import logging
-import time
-from typing import Any, Optional
+from typing import Any
 from urllib.parse import urlencode
 
 import jwt as pyjwt
 from fastapi import APIRouter, Form, HTTPException, Request
-from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
+from fastapi.responses import HTMLResponse
 
 from .auth_flow import ForgejoAuthFlow
 from .config import ForgejoConfig

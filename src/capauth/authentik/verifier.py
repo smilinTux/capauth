@@ -104,8 +104,8 @@ def _verify_with_gnupg(payload: bytes, signature_armor: str, public_key_armor: s
     Returns:
         bool: True if the signature is valid.
     """
-    import tempfile as _tmp
     import os as _os
+    import tempfile as _tmp
 
     try:
         import gnupg

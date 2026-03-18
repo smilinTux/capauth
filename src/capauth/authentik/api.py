@@ -7,10 +7,9 @@ and bound to flows via the API and admin UI.
 from __future__ import annotations
 
 try:
-    from rest_framework.viewsets import ModelViewSet
-
     from authentik.core.api.used_by import UsedByMixin
     from authentik.flows.api.stages import StageSerializer
+    from rest_framework.viewsets import ModelViewSet
 
     from .stage import CapAuthStage
 

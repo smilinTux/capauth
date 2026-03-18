@@ -22,7 +22,6 @@ from uuid import uuid4
 
 from pydantic import BaseModel, Field
 
-from .exceptions import CapAuthError
 from .profile import DEFAULT_CAPAUTH_DIR
 
 logger = logging.getLogger("capauth.pma")
@@ -412,8 +411,8 @@ def _sign_request(
         The request with signature populated.
     """
     try:
-        from .profile import load_profile
         from .crypto import get_backend
+        from .profile import load_profile
 
         profile = load_profile(base)
         backend = get_backend(profile.crypto_backend)
@@ -445,8 +444,8 @@ def _sign_claim(
         The claim with steward_signature populated.
     """
     try:
-        from .profile import load_profile
         from .crypto import get_backend
+        from .profile import load_profile
 
         profile = load_profile(base)
         backend = get_backend(profile.crypto_backend)

@@ -77,8 +77,6 @@ class MDNSDiscovery(DiscoveryBackend):
             return
 
         try:
-            from zeroconf import Zeroconf
-
             if self._info and self._zc:
                 self._zc.unregister_service(self._info)
             if self._zc:

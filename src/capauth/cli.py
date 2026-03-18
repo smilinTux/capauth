@@ -826,7 +826,6 @@ def mesh_status(ctx: click.Context, json_out: bool) -> None:
 @click.pass_context
 def mesh_announce(ctx: click.Context) -> None:
     """Announce your presence on all discovery backends."""
-    from .discovery.base import PeerInfo
     from .discovery.file_discovery import FileDiscovery
     from .mesh import PeerMesh
     from .profile import load_profile

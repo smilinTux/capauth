@@ -31,7 +31,6 @@ from typing import Any, Optional
 
 from .config import ForgejoConfig
 
-
 # ---------------------------------------------------------------------------
 # In-memory auth code store
 # ---------------------------------------------------------------------------

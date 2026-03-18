@@ -54,6 +54,7 @@ dev = [
     "python-gnupg>=0.5",
     "black>=24.0",
     "ruff>=0.3",
+    "zeroconf>=0.38",
 ]
 all = [
     "capauth[gnupg,service,dev]",

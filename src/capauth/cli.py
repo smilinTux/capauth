@@ -1096,6 +1096,107 @@ AUTO_DISCOVER_URL                 = {discovery_url}
         )
 
 
+@main.command("discover")
+@click.option(
+    "--agents-dir",
+    default=None,
+    type=click.Path(),
+    help="Directory containing agent JSON files (default: ~/.skcapstone/coordination/agents/).",
+)
+@click.option("--json-out", is_flag=True, help="Output discovered peers as JSON.")
+@click.option("--add-peers", is_flag=True, help="Add discovered peers to the local mesh registry.")
+@click.pass_context
+def discover(
+    ctx: click.Context, agents_dir: Optional[str], json_out: bool, add_peers: bool
+) -> None:
+    """Discover CapAuth peers via Syncthing."""
+    import json as _json
+
+    from .discovery.syncthing import _DEFAULT_AGENTS_DIR, SyncthingDiscovery, _syncthing_get
+
+    agents_path = Path(agents_dir) if agents_dir else _DEFAULT_AGENTS_DIR
+    st = SyncthingDiscovery(agents_dir=agents_path)
+
+    # Check reachability via ping directly (bypasses api_key guard for CLI context)
+    ping = _syncthing_get(f"{st._api_url}/rest/system/ping", st._api_key, timeout=2)
+    if ping is None:
+        click.echo("Syncthing is not reachable. Check that it is running and the API key is set.")
+        raise SystemExit(1)
+
+    peers = st.discover()
+
+    if not peers:
+        click.echo("No peers discovered via Syncthing.")
+        return
+
+    if json_out:
+        click.echo(_json.dumps([p.model_dump(mode="json") for p in peers], indent=2, default=str))
+        return
+
+    if add_peers:
+        from .mesh import PeerMesh
+        from .profile import load_profile
+
+        base = ctx.obj.get("home")
+        profile = load_profile(base)
+        m = PeerMesh(
+            fingerprint=profile.key_info.fingerprint,
+            name=profile.entity.name,
+            entity_type=profile.entity.entity_type.value,
+            base_dir=base,
+        )
+        for p in peers:
+            m.add_peer(p)
+        click.echo(f"Added {len(peers)} peer(s) to the mesh registry.")
+        return
+
+    for p in peers:
+        click.echo(f"  {p.name or '—'}  {p.fingerprint[:16]}...  [{p.entity_type}]  via syncthing")
+
+
+@main.group("peers")
+def peers_group() -> None:
+    """Manage known sovereign peers."""
+
+
+@peers_group.command("list")
+@click.option("--auto", is_flag=True, help="Auto-discover peers via Syncthing before listing.")
+@click.pass_context
+def peers_list(ctx: click.Context, auto: bool) -> None:
+    """List known peers."""
+    from .mesh import PeerMesh
+    from .profile import load_profile
+
+    base = ctx.obj.get("home")
+    profile = load_profile(base)
+    m = PeerMesh(
+        fingerprint=profile.key_info.fingerprint,
+        name=profile.entity.name,
+        entity_type=profile.entity.entity_type.value,
+        base_dir=base,
+    )
+
+    if auto:
+        from .discovery.syncthing import SyncthingDiscovery, _syncthing_get
+
+        st = SyncthingDiscovery()
+        ping = _syncthing_get(f"{st._api_url}/rest/system/ping", st._api_key, timeout=2)
+        if ping is None:
+            click.echo("Syncthing not reachable — skipping auto-discovery.")
+        else:
+            discovered = st.discover()
+            for p in discovered:
+                m.add_peer(p)
+
+    known = m.get_peers()
+    if not known:
+        click.echo("No known peers.")
+        return
+
+    for p in known:
+        click.echo(f"  {p.name or '—'}  {p.fingerprint[:16]}...  [{p.entity_type}]")
+
+
 def _render_profile(p: "SovereignProfile") -> None:
     """Pretty-print a sovereign profile using Rich.
 

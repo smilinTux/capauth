@@ -128,6 +128,9 @@ class TestServiceEndpoints:
             except Exception:
                 pass
         svc_app._keystore = KeyStore(tmp_path / "service_test.db")
+        svc_app.SERVICE_ID = "test.capauth.local"
+        svc_app.ADMIN_TOKEN = "test-admin-token"
+        svc_app.JWT_SECRET = "test-jwt-secret-deterministic"
 
         from fastapi.testclient import TestClient
 
@@ -227,8 +230,10 @@ class TestServiceEndpoints:
 
     def test_userinfo_valid_token(self) -> None:
         """Userinfo endpoint should return claims for a valid JWT."""
-        import jwt as pyjwt
         import time
+
+        import jwt as pyjwt
+
         import capauth.service.app as svc_app
 
         svc_app.JWT_SECRET = "test-jwt-secret-deterministic"
@@ -314,8 +319,9 @@ class TestJWTTokens:
 
     def _make_jwt(self, sub: str = "A" * 40, exp_offset: int = 3600) -> str:
         """Generate a test JWT directly."""
-        import jwt as pyjwt
         import time
+
+        import jwt as pyjwt
 
         now = int(time.time())
         payload = {
@@ -359,8 +365,9 @@ class TestJWTTokens:
 
     def test_token_info_wrong_secret(self) -> None:
         """Token signed with wrong secret should return active=false."""
-        import jwt as pyjwt
         import time
+
+        import jwt as pyjwt
 
         payload = {
             "sub": "C" * 40,
@@ -401,8 +408,6 @@ class TestJWTTokens:
 
     def test_oidc_callback_token_exchange_success(self) -> None:
         """Callback with valid code triggers token exchange and returns CapAuth JWT."""
-        import time
-        import jwt as pyjwt
         from unittest.mock import AsyncMock, MagicMock, patch
 
         fake_oidc_cfg = {
@@ -471,7 +476,6 @@ class TestJWTTokens:
         nonce_id = nonce_record["nonce"]
 
         # Inject a fake verify that bypasses sig check by patching verify_auth_response
-        import capauth.service.app as svc_app
         from unittest.mock import patch
 
         fake_claims = {"sub": FAKE_FP, "capauth_fingerprint": FAKE_FP, "amr": ["pgp"]}

@@ -78,12 +78,15 @@ CAPAUTH_SERVICE_ID: str = os.environ.get("CAPAUTH_SERVICE_ID", "authentik.local"
 CAPAUTH_SERVER_KEY_ARMOR: str = os.environ.get("CAPAUTH_SERVER_KEY_ARMOR", "")
 CAPAUTH_SERVER_KEY_PASSPHRASE: str = os.environ.get("CAPAUTH_SERVER_KEY_PASSPHRASE", "")
 # Whether to require admin approval for new key enrollments
-CAPAUTH_REQUIRE_APPROVAL: bool = os.environ.get("CAPAUTH_REQUIRE_APPROVAL", "false").lower() == "true"
+CAPAUTH_REQUIRE_APPROVAL: bool = (
+    os.environ.get("CAPAUTH_REQUIRE_APPROVAL", "false").lower() == "true"
+)
 
 
 # ---------------------------------------------------------------------------
 # Django Model (Authentik stage configuration)
 # ---------------------------------------------------------------------------
+
 
 def _default_capauth_stage_name() -> str:
     """Generate a unique default name for CapAuthStage (Stage.name is unique)."""
@@ -91,6 +94,7 @@ def _default_capauth_stage_name() -> str:
 
 
 if _AUTHENTIK_AVAILABLE:
+
     class CapAuthStage(Stage):
         """Authentik stage that authenticates users via CapAuth PGP challenge-response.
 
@@ -131,6 +135,7 @@ if _AUTHENTIK_AVAILABLE:
         @property
         def serializer(self):
             from .api import CapAuthStageSerializer
+
             return CapAuthStageSerializer
 
         @property
@@ -147,6 +152,7 @@ if _AUTHENTIK_AVAILABLE:
 # ---------------------------------------------------------------------------
 
 if _AUTHENTIK_AVAILABLE:
+
     class CapAuthKeyRegistry(models.Model):
         """Stores enrolled PGP public keys for authentication.
 
@@ -196,6 +202,7 @@ if _AUTHENTIK_AVAILABLE:
 # ---------------------------------------------------------------------------
 # Challenge / Response logic (framework-independent)
 # ---------------------------------------------------------------------------
+
 
 def build_challenge(
     fingerprint: str,
@@ -306,7 +313,9 @@ def verify_auth_response(
             claims=claims,
         )
         if not verify_claims_signature(claims_payload, claims_signature_armor, public_key_armor):
-            logger.warning("Claims signature verification failed for fingerprint %s", fingerprint[:8])
+            logger.warning(
+                "Claims signature verification failed for fingerprint %s", fingerprint[:8]
+            )
             return False, "invalid_claims_signature", {}
     elif claims_signature_armor and not claims:
         # Signature present but no claims — treat as anonymous
@@ -327,6 +336,7 @@ def verify_auth_response(
 # ---------------------------------------------------------------------------
 
 if _AUTHENTIK_AVAILABLE:
+
     class CapAuthChallenge(Challenge):
         """Challenge sent to the frontend: either request fingerprint or show nonce/QR."""
 
@@ -359,6 +369,7 @@ if _AUTHENTIK_AVAILABLE:
 # ---------------------------------------------------------------------------
 
 if _AUTHENTIK_AVAILABLE:
+
     class CapAuthStageView(ChallengeStageView):
         """Authentik stage view implementing the CapAuth challenge-response flow.
 
@@ -411,19 +422,26 @@ if _AUTHENTIK_AVAILABLE:
                 "component": "ak-stage-capauth",
             }
             if is_qr:
-                data["qr_payload"] = json.dumps({
-                    "capauth_qr": "1.0",
-                    "nonce": challenge["nonce"],
-                    "service": challenge["service"],
-                    "callback": request.build_absolute_uri(f"/capauth/v1/qr-verify/{challenge['nonce']}"),
-                    "expires": challenge["expires"],
-                }, separators=(",", ":"))
+                data["qr_payload"] = json.dumps(
+                    {
+                        "capauth_qr": "1.0",
+                        "nonce": challenge["nonce"],
+                        "service": challenge["service"],
+                        "callback": request.build_absolute_uri(
+                            f"/capauth/v1/qr-verify/{challenge['nonce']}"
+                        ),
+                        "expires": challenge["expires"],
+                    },
+                    separators=(",", ":"),
+                )
             return CapAuthChallenge(data=data)
 
         def challenge_valid(self, response: CapAuthChallengeResponse) -> HttpResponse:
             """Handle POST: fingerprint-only (return new challenge with nonce) or full signed response (verify and stage_ok)."""
             # Response data may be in validated_data (after is_valid()) or initial_data
-            data = getattr(response, "validated_data", None) or getattr(response, "data", None) or {}
+            data = (
+                getattr(response, "validated_data", None) or getattr(response, "data", None) or {}
+            )
             if not data and hasattr(response, "initial_data"):
                 data = response.initial_data or {}
             fingerprint = (data.get("fingerprint") or "").strip()
@@ -467,13 +485,18 @@ if _AUTHENTIK_AVAILABLE:
                     "component": "ak-stage-capauth",
                 }
                 if is_qr:
-                    new_challenge_data["qr_payload"] = json.dumps({
-                        "capauth_qr": "1.0",
-                        "nonce": challenge["nonce"],
-                        "service": challenge["service"],
-                        "callback": request.build_absolute_uri(f"/capauth/v1/qr-verify/{challenge['nonce']}"),
-                        "expires": challenge["expires"],
-                    }, separators=(",", ":"))
+                    new_challenge_data["qr_payload"] = json.dumps(
+                        {
+                            "capauth_qr": "1.0",
+                            "nonce": challenge["nonce"],
+                            "service": challenge["service"],
+                            "callback": request.build_absolute_uri(
+                                f"/capauth/v1/qr-verify/{challenge['nonce']}"
+                            ),
+                            "expires": challenge["expires"],
+                        },
+                        separators=(",", ":"),
+                    )
                 return HttpChallengeResponse(CapAuthChallenge(data=new_challenge_data))
 
             # Step 2: Full signed response
@@ -532,6 +555,7 @@ if _AUTHENTIK_AVAILABLE:
             )
 
             from django.contrib.auth import get_user_model
+
             User = get_user_model()
             effective_fp = key_record.effective_fingerprint
             user, created = User.objects.get_or_create(username=effective_fp)
@@ -542,5 +566,9 @@ if _AUTHENTIK_AVAILABLE:
             self.executor.plan.context[PLAN_CONTEXT_PENDING_USER] = user
             self.executor.plan.context["capauth_oidc_claims"] = oidc_claims
             self.executor.plan.context["capauth_fingerprint_verified"] = effective_fp
-            logger.info("CapAuth authentication completed for fingerprint %s (new=%s)", effective_fp[:8], created)
+            logger.info(
+                "CapAuth authentication completed for fingerprint %s (new=%s)",
+                effective_fp[:8],
+                created,
+            )
             return self.executor.stage_ok()

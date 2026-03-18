@@ -51,6 +51,7 @@ class MDNSDiscovery(DiscoveryBackend):
         """Check if zeroconf is installed."""
         try:
             import zeroconf  # noqa: F401
+
             return True
         except ImportError:
             return False
@@ -131,6 +132,7 @@ class MDNSDiscovery(DiscoveryBackend):
 
             if not self._zc:
                 from zeroconf import Zeroconf
+
                 self._zc = Zeroconf()
 
             self._zc.register_service(self._info)
@@ -171,7 +173,9 @@ class MDNSDiscovery(DiscoveryBackend):
                 return
 
             props = {
-                k.decode() if isinstance(k, bytes) else k: v.decode() if isinstance(v, bytes) else v
+                k.decode() if isinstance(k, bytes) else k: v.decode()
+                if isinstance(v, bytes)
+                else v
                 for k, v in (info.properties or {}).items()
             }
 

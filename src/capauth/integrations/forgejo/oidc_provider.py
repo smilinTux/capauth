@@ -225,10 +225,19 @@ def build_router(flow: ForgejoAuthFlow, config: ForgejoConfig) -> APIRouter:
             "userinfo_signing_alg_values_supported": ["none"],
             "scopes_supported": ["openid", "profile", "email", "groups"],
             "claims_supported": [
-                "sub", "iss", "iat", "exp",
-                "name", "preferred_username", "email", "email_verified",
-                "picture", "groups", "locale",
-                "capauth_fingerprint", "amr",
+                "sub",
+                "iss",
+                "iat",
+                "exp",
+                "name",
+                "preferred_username",
+                "email",
+                "email_verified",
+                "picture",
+                "groups",
+                "locale",
+                "capauth_fingerprint",
+                "amr",
             ],
             "grant_types_supported": ["authorization_code"],
             "token_endpoint_auth_methods_supported": [
@@ -303,7 +312,9 @@ def build_router(flow: ForgejoAuthFlow, config: ForgejoConfig) -> APIRouter:
         oidc_claims: dict[str, Any] = body.get("oidc_claims", {})
 
         if not state or not fingerprint or not access_token:
-            raise HTTPException(status_code=400, detail="state, fingerprint, and access_token required")
+            raise HTTPException(
+                status_code=400, detail="state, fingerprint, and access_token required"
+            )
 
         # Validate the CapAuth JWT to confirm identity
         try:
@@ -395,7 +406,7 @@ def build_router(flow: ForgejoAuthFlow, config: ForgejoConfig) -> APIRouter:
         if not auth.startswith("Bearer "):
             raise HTTPException(status_code=401, detail="Bearer token required")
 
-        token = auth[len("Bearer "):]
+        token = auth[len("Bearer ") :]
         try:
             payload = pyjwt.decode(
                 token,

@@ -61,9 +61,7 @@ class TestFullVerification:
         """Expected: Bob can prove his identity to Alice."""
         challenge = create_challenge(alice_keys.fingerprint, bob_keys.fingerprint)
 
-        response = respond_to_challenge(
-            challenge, bob_keys.private_armor, PASS_B
-        )
+        response = respond_to_challenge(challenge, bob_keys.private_armor, PASS_B)
         assert response.challenge_id == challenge.challenge_id
         assert response.responder_fingerprint == bob_keys.fingerprint
 
@@ -75,9 +73,7 @@ class TestFullVerification:
         challenge = create_challenge(alice_keys.fingerprint, bob_keys.fingerprint)
 
         # Reason: Alice signs instead of Bob — fingerprint mismatch expected
-        response = respond_to_challenge(
-            challenge, alice_keys.private_armor, PASS_A
-        )
+        response = respond_to_challenge(challenge, alice_keys.private_armor, PASS_A)
 
         with pytest.raises(VerificationError, match="Fingerprint mismatch"):
             verify_challenge(challenge, response, alice_keys.public_armor)
@@ -86,9 +82,7 @@ class TestFullVerification:
         """Failure: modifying challenge hex after signing should break verification."""
         challenge = create_challenge(alice_keys.fingerprint, bob_keys.fingerprint)
 
-        response = respond_to_challenge(
-            challenge, bob_keys.private_armor, PASS_B
-        )
+        response = respond_to_challenge(challenge, bob_keys.private_armor, PASS_B)
 
         challenge.challenge_hex = "deadbeef" * 8
         with pytest.raises(VerificationError, match="tampered"):

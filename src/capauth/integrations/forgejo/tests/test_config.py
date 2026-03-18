@@ -52,7 +52,9 @@ class TestForgejoConfig:
 
     def test_oidc_discovery_url(self) -> None:
         cfg = ForgejoConfig(capauth_base_url="https://auth.example.com")
-        assert cfg.oidc_discovery_url == "https://auth.example.com/.well-known/openid-configuration"
+        assert (
+            cfg.oidc_discovery_url == "https://auth.example.com/.well-known/openid-configuration"
+        )
 
     def test_forgejo_redirect_uri(self) -> None:
         cfg = ForgejoConfig(forgejo_base_url="https://git.example.com")

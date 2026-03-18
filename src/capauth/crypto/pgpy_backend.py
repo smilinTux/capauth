@@ -78,9 +78,7 @@ class PGPyBackend(CryptoBackend):
             )
 
             if algorithm == Algorithm.ED25519:
-                enc_subkey = pgpy.PGPKey.new(
-                    PubKeyAlgorithm.ECDH, EllipticCurveOID.Curve25519
-                )
+                enc_subkey = pgpy.PGPKey.new(PubKeyAlgorithm.ECDH, EllipticCurveOID.Curve25519)
             else:
                 enc_subkey = pgpy.PGPKey.new(PubKeyAlgorithm.RSAEncryptOrSign, 4096)
 

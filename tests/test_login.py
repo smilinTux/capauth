@@ -52,12 +52,17 @@ class TestLoadClaims:
     def test_returns_default_claims(self, tmp_path):
         """Loads the default claims block from profile.yml."""
         profile_yml = tmp_path / "profile.yml"
-        profile_yml.write_text(yaml.dump({
-            "claims": {
-                "name": "Chef",
-                "email": "chef@example.com",
-            }
-        }), encoding="utf-8")
+        profile_yml.write_text(
+            yaml.dump(
+                {
+                    "claims": {
+                        "name": "Chef",
+                        "email": "chef@example.com",
+                    }
+                }
+            ),
+            encoding="utf-8",
+        )
 
         claims = _load_claims(base=tmp_path, service_id="any.service", service_profile_name=None)
         assert claims["name"] == "Chef"
@@ -66,12 +71,17 @@ class TestLoadClaims:
     def test_service_override_takes_precedence(self, tmp_path):
         """Service-specific profile overrides the default claims."""
         profile_yml = tmp_path / "profile.yml"
-        profile_yml.write_text(yaml.dump({
-            "claims": {"name": "Chef", "email": "chef@example.com"},
-            "service_profiles": {
-                "gitea.example.com": {"name": "chef-dev", "email": "dev@example.com"},
-            },
-        }), encoding="utf-8")
+        profile_yml.write_text(
+            yaml.dump(
+                {
+                    "claims": {"name": "Chef", "email": "chef@example.com"},
+                    "service_profiles": {
+                        "gitea.example.com": {"name": "chef-dev", "email": "dev@example.com"},
+                    },
+                }
+            ),
+            encoding="utf-8",
+        )
 
         claims = _load_claims(
             base=tmp_path,
@@ -84,12 +94,17 @@ class TestLoadClaims:
     def test_explicit_profile_name_overrides_service_id(self, tmp_path):
         """Explicit --service-profile name takes precedence over service hostname."""
         profile_yml = tmp_path / "profile.yml"
-        profile_yml.write_text(yaml.dump({
-            "claims": {"name": "Chef"},
-            "service_profiles": {
-                "dev-mode": {"name": "hacker-chef"},
-            },
-        }), encoding="utf-8")
+        profile_yml.write_text(
+            yaml.dump(
+                {
+                    "claims": {"name": "Chef"},
+                    "service_profiles": {
+                        "dev-mode": {"name": "hacker-chef"},
+                    },
+                }
+            ),
+            encoding="utf-8",
+        )
 
         claims = _load_claims(
             base=tmp_path,
@@ -114,11 +129,16 @@ class TestLoadCachedToken:
         token_dir.mkdir(parents=True)
         token_file = token_dir / "tokens.json"
 
-        token_file.write_text(json.dumps({
-            "access_token": "test-token",
-            "expires_in": 3600,
-            "cached_at": datetime.now(timezone.utc).isoformat(),
-        }), encoding="utf-8")
+        token_file.write_text(
+            json.dumps(
+                {
+                    "access_token": "test-token",
+                    "expires_in": 3600,
+                    "cached_at": datetime.now(timezone.utc).isoformat(),
+                }
+            ),
+            encoding="utf-8",
+        )
 
         result = load_cached_token(f"https://{service_id}", base_dir=tmp_path)
         assert result is not None
@@ -131,11 +151,16 @@ class TestLoadCachedToken:
         token_dir.mkdir(parents=True)
         token_file = token_dir / "tokens.json"
 
-        token_file.write_text(json.dumps({
-            "access_token": "old-token",
-            "expires_in": 1,
-            "cached_at": "2020-01-01T00:00:00+00:00",  # ancient
-        }), encoding="utf-8")
+        token_file.write_text(
+            json.dumps(
+                {
+                    "access_token": "old-token",
+                    "expires_in": 1,
+                    "cached_at": "2020-01-01T00:00:00+00:00",  # ancient
+                }
+            ),
+            encoding="utf-8",
+        )
 
         result = load_cached_token(f"https://{service_id}", base_dir=tmp_path)
         assert result is None
@@ -182,7 +207,10 @@ class TestLoadIdentity:
         with (
             patch("capauth.login._fingerprint_in_gpg_keyring", return_value=True),
             patch("capauth.login._gpg_export_pubkey", return_value=fake_pub),
-            patch("capauth.login._gpg_sign", return_value="-----BEGIN PGP SIGNATURE-----\nfake\n-----END PGP SIGNATURE-----") as mock_sign,
+            patch(
+                "capauth.login._gpg_sign",
+                return_value="-----BEGIN PGP SIGNATURE-----\nfake\n-----END PGP SIGNATURE-----",
+            ) as mock_sign,
         ):
             fp, pub, sign_fn = _load_identity(tmp_path, passphrase="", use_gpg_keyring=True)
             # Call sign_fn inside the patch context so the mock is still active
@@ -244,7 +272,9 @@ class TestDoLoginWithGpg:
 
         profile_yml = tmp_path / "profile.yml"
         profile_yml.write_text(
-            yaml.dump({"fingerprint": FP, "claims": {"name": "GPG User", "email": "gpg@example.com"}}),
+            yaml.dump(
+                {"fingerprint": FP, "claims": {"name": "GPG User", "email": "gpg@example.com"}}
+            ),
             encoding="utf-8",
         )
 
@@ -300,7 +330,9 @@ class TestDoLoginWithGpg:
         FAKE_SIG = "-----BEGIN PGP SIGNATURE-----\nfake\n-----END PGP SIGNATURE-----"
 
         profile_yml = tmp_path / "profile.yml"
-        profile_yml.write_text(yaml.dump({"fingerprint": FP, "claims": {"name": "Hidden"}}), encoding="utf-8")
+        profile_yml.write_text(
+            yaml.dump({"fingerprint": FP, "claims": {"name": "Hidden"}}), encoding="utf-8"
+        )
 
         challenge = self._make_fake_challenge()
         verify_body_received: dict = {}

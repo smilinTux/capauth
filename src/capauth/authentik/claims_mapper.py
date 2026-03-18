@@ -15,7 +15,16 @@ from typing import Any
 
 # OIDC standard scopes to their constituent claims
 SCOPE_CLAIMS: dict[str, list[str]] = {
-    "profile": ["name", "preferred_username", "picture", "locale", "zoneinfo", "updated_at", "agent_type", "soul_blueprint_category"],
+    "profile": [
+        "name",
+        "preferred_username",
+        "picture",
+        "locale",
+        "zoneinfo",
+        "updated_at",
+        "agent_type",
+        "soul_blueprint_category",
+    ],
     "email": ["email", "email_verified"],
     "groups": ["groups"],
 }

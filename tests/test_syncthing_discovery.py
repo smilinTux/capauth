@@ -210,9 +210,7 @@ def test_available_returns_false_no_api_key(agents_dir):
     assert st.available() is False
 
 
-def test_get_device_ids_from_connections(
-    agents_dir, syncthing_connections_response
-):
+def test_get_device_ids_from_connections(agents_dir, syncthing_connections_response):
     st = _make_discovery(agents_dir, connected_only=False)
     with patch(
         "capauth.discovery.syncthing._syncthing_get",
@@ -224,9 +222,7 @@ def test_get_device_ids_from_connections(
     assert DEVICE_B in ids  # not connected_only, so all included
 
 
-def test_get_device_ids_connected_only(
-    agents_dir, syncthing_connections_response
-):
+def test_get_device_ids_connected_only(agents_dir, syncthing_connections_response):
     st = _make_discovery(agents_dir, connected_only=True)
     with patch(
         "capauth.discovery.syncthing._syncthing_get",
@@ -238,9 +234,7 @@ def test_get_device_ids_connected_only(
     assert DEVICE_B not in ids  # not connected
 
 
-def test_discover_returns_matching_peers(
-    agents_dir, syncthing_connections_response
-):
+def test_discover_returns_matching_peers(agents_dir, syncthing_connections_response):
     st = _make_discovery(agents_dir)
     with patch(
         "capauth.discovery.syncthing._syncthing_get",
@@ -257,9 +251,7 @@ def test_discover_returns_matching_peers(
     assert p.metadata["syncthing_device_id"] == DEVICE_A
 
 
-def test_discover_skips_missing_fingerprint(
-    agents_dir, syncthing_connections_response
-):
+def test_discover_skips_missing_fingerprint(agents_dir, syncthing_connections_response):
     """Agent nofp has syncthing_device_id but no capauth_fingerprint — skip."""
     st = _make_discovery(agents_dir)
     with patch(
@@ -461,9 +453,7 @@ def test_cli_peers_list_auto_syncthing_unavailable(cli_home):
     assert "not reachable" in result.output.lower() or "skipping" in result.output.lower()
 
 
-def test_cli_peers_list_auto_discovers_peers(
-    cli_home, agents_dir, syncthing_connections_response
-):
+def test_cli_peers_list_auto_discovers_peers(cli_home, agents_dir, syncthing_connections_response):
     """capauth peers list --auto adds discovered peers before listing."""
     runner = CliRunner()
 

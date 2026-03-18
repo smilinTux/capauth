@@ -27,7 +27,9 @@ class EnrolledKey(BaseModel):
     enrolled_at: str = Field(description="ISO 8601 enrollment timestamp")
     last_auth: Optional[str] = Field(default=None, description="Last successful auth")
     approved: bool = Field(default=True)
-    linked_to: Optional[str] = Field(default=None, description="Primary fingerprint for multi-device")
+    linked_to: Optional[str] = Field(
+        default=None, description="Primary fingerprint for multi-device"
+    )
 
     @property
     def effective_fingerprint(self) -> str:

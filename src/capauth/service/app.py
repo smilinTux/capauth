@@ -186,7 +186,10 @@ async def challenge_endpoint(req: ChallengeRequest) -> dict[str, Any]:
     if not req.fingerprint or len(req.fingerprint) != 40:
         raise HTTPException(
             status_code=400,
-            detail={"error": "invalid_fingerprint", "error_description": "Provide a 40-char fingerprint."},
+            detail={
+                "error": "invalid_fingerprint",
+                "error_description": "Provide a 40-char fingerprint.",
+            },
         )
 
     challenge = build_challenge(
@@ -222,7 +225,10 @@ async def verify_endpoint(req: VerifyRequest) -> dict[str, Any]:
     if not all([req.fingerprint, req.nonce, req.nonce_signature]):
         raise HTTPException(
             status_code=400,
-            detail={"error": "invalid_request", "error_description": "fingerprint, nonce, nonce_signature required."},
+            detail={
+                "error": "invalid_request",
+                "error_description": "fingerprint, nonce, nonce_signature required.",
+            },
         )
 
     public_key_armor = req.public_key
@@ -234,7 +240,10 @@ async def verify_endpoint(req: VerifyRequest) -> dict[str, Any]:
     elif not public_key_armor and not existing:
         raise HTTPException(
             status_code=401,
-            detail={"error": "unknown_fingerprint", "error_description": "Fingerprint not enrolled. Include public_key."},
+            detail={
+                "error": "unknown_fingerprint",
+                "error_description": "Fingerprint not enrolled. Include public_key.",
+            },
         )
 
     # Verify fingerprint matches submitted key
@@ -243,7 +252,10 @@ async def verify_endpoint(req: VerifyRequest) -> dict[str, Any]:
         if derived_fp and derived_fp.upper() != req.fingerprint.upper():
             raise HTTPException(
                 status_code=401,
-                detail={"error": "invalid_fingerprint", "error_description": "public_key does not match claimed fingerprint."},
+                detail={
+                    "error": "invalid_fingerprint",
+                    "error_description": "public_key does not match claimed fingerprint.",
+                },
             )
 
     # Handle new enrollment
@@ -253,7 +265,10 @@ async def verify_endpoint(req: VerifyRequest) -> dict[str, Any]:
             ks.enroll(req.fingerprint, public_key_armor, approved=False)
             raise HTTPException(
                 status_code=403,
-                detail={"status": "enrollment_pending", "error_description": "New key requires admin approval."},
+                detail={
+                    "status": "enrollment_pending",
+                    "error_description": "New key requires admin approval.",
+                },
             )
         ks.enroll(req.fingerprint, public_key_armor, approved=True)
         logger.info("New CapAuth key enrolled: %s", req.fingerprint[:8])
@@ -263,7 +278,10 @@ async def verify_endpoint(req: VerifyRequest) -> dict[str, Any]:
     if key_record and not key_record.approved:
         raise HTTPException(
             status_code=403,
-            detail={"status": "enrollment_pending", "error_description": "Key pending admin approval."},
+            detail={
+                "status": "enrollment_pending",
+                "error_description": "Key pending admin approval.",
+            },
         )
 
     # Reconstruct challenge context from the nonce store
@@ -365,7 +383,9 @@ async def token_info_endpoint(token: str) -> dict[str, Any]:
 def _check_admin(request: Request) -> None:
     """Verify admin authorization via bearer token."""
     if not ADMIN_TOKEN:
-        raise HTTPException(status_code=501, detail="Admin API not configured. Set CAPAUTH_ADMIN_TOKEN.")
+        raise HTTPException(
+            status_code=501, detail="Admin API not configured. Set CAPAUTH_ADMIN_TOKEN."
+        )
     auth = request.headers.get("Authorization", "")
     if auth != f"Bearer {ADMIN_TOKEN}":
         raise HTTPException(status_code=403, detail="Invalid admin token.")
@@ -447,10 +467,21 @@ async def oidc_discovery() -> dict[str, Any]:
         "userinfo_signing_alg_values_supported": ["none"],
         "scopes_supported": ["openid", "profile", "email", "groups"],
         "claims_supported": [
-            "sub", "iss", "iat", "exp",
-            "name", "preferred_username", "email", "email_verified",
-            "picture", "groups", "locale", "zoneinfo",
-            "capauth_fingerprint", "agent_type", "amr",
+            "sub",
+            "iss",
+            "iat",
+            "exp",
+            "name",
+            "preferred_username",
+            "email",
+            "email_verified",
+            "picture",
+            "groups",
+            "locale",
+            "zoneinfo",
+            "capauth_fingerprint",
+            "agent_type",
+            "amr",
         ],
         "grant_types_supported": ["authorization_code"],
         "token_endpoint_auth_methods_supported": [
@@ -492,7 +523,7 @@ async def userinfo_endpoint(request: Request) -> dict[str, Any]:
             status_code=401,
             detail={"error": "missing_token", "error_description": "Bearer token required."},
         )
-    token = auth[len("Bearer "):]
+    token = auth[len("Bearer ") :]
     try:
         payload = jwt.decode(
             token,
@@ -550,7 +581,9 @@ async def _get_oidc_config() -> dict[str, Any]:
 
 
 @app.get("/capauth/v1/callback", response_class=HTMLResponse)
-async def oidc_callback(request: Request, code: str = "", error: str = "", error_description: str = "") -> Any:
+async def oidc_callback(
+    request: Request, code: str = "", error: str = "", error_description: str = ""
+) -> Any:
     """OAuth2 authorization code callback from the upstream IdP (Authentik).
 
     After the user authenticates with Authentik, the browser is redirected here
@@ -581,7 +614,10 @@ async def oidc_callback(request: Request, code: str = "", error: str = "", error
         raise HTTPException(status_code=400, detail="Missing authorization code.")
 
     if not AUTHENTIK_CLIENT_ID or not AUTHENTIK_CLIENT_SECRET:
-        raise HTTPException(status_code=501, detail="Upstream OIDC not configured. Set AUTHENTIK_CLIENT_ID and AUTHENTIK_CLIENT_SECRET.")
+        raise HTTPException(
+            status_code=501,
+            detail="Upstream OIDC not configured. Set AUTHENTIK_CLIENT_ID and AUTHENTIK_CLIENT_SECRET.",
+        )
 
     base_url = os.environ.get("CAPAUTH_BASE_URL", f"https://{SERVICE_ID}")
     redirect_uri = f"{base_url}/capauth/v1/callback"
@@ -611,8 +647,12 @@ async def oidc_callback(request: Request, code: str = "", error: str = "", error
             token_resp.raise_for_status()
             token_data = token_resp.json()
         except httpx.HTTPStatusError as exc:
-            logger.error("Token exchange failed: %s %s", exc.response.status_code, exc.response.text)
-            raise HTTPException(status_code=502, detail=f"Token exchange failed: {exc.response.status_code}")
+            logger.error(
+                "Token exchange failed: %s %s", exc.response.status_code, exc.response.text
+            )
+            raise HTTPException(
+                status_code=502, detail=f"Token exchange failed: {exc.response.status_code}"
+            )
         except Exception as exc:
             logger.error("Token exchange error: %s", exc)
             raise HTTPException(status_code=502, detail=f"Token exchange error: {exc}")
@@ -632,7 +672,9 @@ async def oidc_callback(request: Request, code: str = "", error: str = "", error
             logger.warning("Userinfo fetch failed, using id_token claims only: %s", exc)
             # Fall back to decoding id_token without verification for claims
             try:
-                userinfo = jwt.decode(id_token, options={"verify_signature": False}) if id_token else {}
+                userinfo = (
+                    jwt.decode(id_token, options={"verify_signature": False}) if id_token else {}
+                )
             except Exception:
                 userinfo = {}
 
@@ -680,7 +722,7 @@ async def oidc_callback(request: Request, code: str = "", error: str = "", error
           <div class="token" id="token">{capauth_token}</div>
           <p class="label">Identity: {upstream_sub}</p>
           <p class="label">Email: {upstream_email}</p>
-          <p class="label">Groups: {', '.join(upstream_groups) if upstream_groups else 'none'}</p>
+          <p class="label">Groups: {", ".join(upstream_groups) if upstream_groups else "none"}</p>
           <p class="label" style="margin-top:2em;color:#475569">
             This token expires in {JWT_EXPIRY_SECONDS // 60} minutes.
             Use it as: <code>Authorization: Bearer &lt;token&gt;</code>
@@ -816,7 +858,8 @@ async def qr_login_page(request: Request) -> HTMLResponse:
     base_url = os.environ.get("CAPAUTH_BASE_URL", f"https://{SERVICE_ID}")
     redirect_to = request.query_params.get("redirect", "")
 
-    return HTMLResponse(content=f"""<!DOCTYPE html>
+    return HTMLResponse(
+        content=f"""<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
@@ -1031,7 +1074,8 @@ async def qr_login_page(request: Request) -> HTMLResponse:
     initQR();
   </script>
 </body>
-</html>""")
+</html>"""
+    )
 
 
 @app.post("/capauth/v1/qr-verify/{nonce_id}")
@@ -1047,7 +1091,10 @@ async def qr_verify_endpoint(nonce_id: str, req: VerifyRequest) -> dict[str, Any
     if not all([req.fingerprint, req.nonce_signature]):
         raise HTTPException(
             status_code=400,
-            detail={"error": "invalid_request", "error_description": "fingerprint and nonce_signature required."},
+            detail={
+                "error": "invalid_request",
+                "error_description": "fingerprint and nonce_signature required.",
+            },
         )
 
     # Override the nonce from the URL path
@@ -1062,7 +1109,10 @@ async def qr_verify_endpoint(nonce_id: str, req: VerifyRequest) -> dict[str, Any
     elif not public_key_armor and not existing:
         raise HTTPException(
             status_code=401,
-            detail={"error": "unknown_fingerprint", "error_description": "Fingerprint not enrolled. Include public_key."},
+            detail={
+                "error": "unknown_fingerprint",
+                "error_description": "Fingerprint not enrolled. Include public_key.",
+            },
         )
 
     # Verify fingerprint matches submitted key
@@ -1071,7 +1121,10 @@ async def qr_verify_endpoint(nonce_id: str, req: VerifyRequest) -> dict[str, Any
         if derived_fp and derived_fp.upper() != req.fingerprint.upper():
             raise HTTPException(
                 status_code=401,
-                detail={"error": "invalid_fingerprint", "error_description": "public_key does not match fingerprint."},
+                detail={
+                    "error": "invalid_fingerprint",
+                    "error_description": "public_key does not match fingerprint.",
+                },
             )
 
     # Handle new enrollment
@@ -1081,7 +1134,10 @@ async def qr_verify_endpoint(nonce_id: str, req: VerifyRequest) -> dict[str, Any
             ks.enroll(req.fingerprint, public_key_armor, approved=False)
             raise HTTPException(
                 status_code=403,
-                detail={"status": "enrollment_pending", "error_description": "New key requires admin approval."},
+                detail={
+                    "status": "enrollment_pending",
+                    "error_description": "New key requires admin approval.",
+                },
             )
         ks.enroll(req.fingerprint, public_key_armor, approved=True)
         logger.info("QR login: new key enrolled: %s", req.fingerprint[:8])

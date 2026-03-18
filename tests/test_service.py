@@ -121,6 +121,7 @@ class TestServiceEndpoints:
         # Reset the keystore singleton (close if open, then re-init)
         import capauth.service.app as svc_app
         from capauth.service.keystore import KeyStore
+
         if svc_app._keystore is not None:
             try:
                 svc_app._keystore.close()
@@ -129,6 +130,7 @@ class TestServiceEndpoints:
         svc_app._keystore = KeyStore(tmp_path / "service_test.db")
 
         from fastapi.testclient import TestClient
+
         self.client = TestClient(svc_app.app)
 
     def test_status(self) -> None:
@@ -141,10 +143,13 @@ class TestServiceEndpoints:
 
     def test_challenge_valid_fingerprint(self) -> None:
         """Challenge should succeed with a valid 40-char fingerprint."""
-        resp = self.client.post("/capauth/v1/challenge", json={
-            "fingerprint": "A" * 40,
-            "client_nonce": "dGVzdA==",
-        })
+        resp = self.client.post(
+            "/capauth/v1/challenge",
+            json={
+                "fingerprint": "A" * 40,
+                "client_nonce": "dGVzdA==",
+            },
+        )
         assert resp.status_code == 200
         data = resp.json()
         assert "nonce" in data
@@ -152,19 +157,25 @@ class TestServiceEndpoints:
 
     def test_challenge_invalid_fingerprint(self) -> None:
         """Challenge should reject short fingerprints."""
-        resp = self.client.post("/capauth/v1/challenge", json={
-            "fingerprint": "short",
-            "client_nonce": "dGVzdA==",
-        })
+        resp = self.client.post(
+            "/capauth/v1/challenge",
+            json={
+                "fingerprint": "short",
+                "client_nonce": "dGVzdA==",
+            },
+        )
         assert resp.status_code == 400
 
     def test_verify_unknown_fingerprint(self) -> None:
         """Verify should reject unknown fingerprints without a public key."""
-        resp = self.client.post("/capauth/v1/verify", json={
-            "fingerprint": "B" * 40,
-            "nonce": "fake-nonce",
-            "nonce_signature": "fake-sig",
-        })
+        resp = self.client.post(
+            "/capauth/v1/verify",
+            json={
+                "fingerprint": "B" * 40,
+                "nonce": "fake-nonce",
+                "nonce_signature": "fake-sig",
+            },
+        )
         assert resp.status_code == 401
 
     def test_oidc_discovery(self) -> None:
@@ -219,6 +230,7 @@ class TestServiceEndpoints:
         import jwt as pyjwt
         import time
         import capauth.service.app as svc_app
+
         svc_app.JWT_SECRET = "test-jwt-secret-deterministic"
 
         now = int(time.time())
@@ -233,7 +245,9 @@ class TestServiceEndpoints:
         }
         token = pyjwt.encode(payload, "test-jwt-secret-deterministic", algorithm="HS256")
 
-        resp = self.client.get("/capauth/v1/userinfo", headers={"Authorization": f"Bearer {token}"})
+        resp = self.client.get(
+            "/capauth/v1/userinfo", headers={"Authorization": f"Bearer {token}"}
+        )
         assert resp.status_code == 200
         data = resp.json()
         assert data["sub"] == "A" * 40
@@ -282,6 +296,7 @@ class TestJWTTokens:
 
         import capauth.service.app as svc_app
         from capauth.service.keystore import KeyStore
+
         if svc_app._keystore is not None:
             try:
                 svc_app._keystore.close()
@@ -293,6 +308,7 @@ class TestJWTTokens:
         svc_app.SERVICE_ID = "jwt.capauth.test"
 
         from fastapi.testclient import TestClient
+
         self.client = TestClient(svc_app.app)
         self.svc_app = svc_app
 
@@ -300,6 +316,7 @@ class TestJWTTokens:
         """Generate a test JWT directly."""
         import jwt as pyjwt
         import time
+
         now = int(time.time())
         payload = {
             "sub": sub,
@@ -344,7 +361,13 @@ class TestJWTTokens:
         """Token signed with wrong secret should return active=false."""
         import jwt as pyjwt
         import time
-        payload = {"sub": "C" * 40, "iss": "test", "iat": int(time.time()), "exp": int(time.time()) + 3600}
+
+        payload = {
+            "sub": "C" * 40,
+            "iss": "test",
+            "iat": int(time.time()),
+            "exp": int(time.time()) + 3600,
+        }
         bad_token = pyjwt.encode(payload, "wrong-secret", algorithm="HS256")
         resp = self.client.get(f"/capauth/v1/token-info?token={bad_token}")
         assert resp.status_code == 200
@@ -357,7 +380,9 @@ class TestJWTTokens:
 
     def test_oidc_callback_error_param(self) -> None:
         """Callback with error param should return 400 HTML with error details."""
-        resp = self.client.get("/capauth/v1/callback?error=access_denied&error_description=User+cancelled")
+        resp = self.client.get(
+            "/capauth/v1/callback?error=access_denied&error_description=User+cancelled"
+        )
         assert resp.status_code == 400
         assert "access_denied" in resp.text
         assert "User cancelled" in resp.text
@@ -365,6 +390,7 @@ class TestJWTTokens:
     def test_oidc_callback_no_client_config(self) -> None:
         """Callback with code but no OIDC client configured returns 501."""
         import capauth.service.app as svc_app
+
         original_id = svc_app.AUTHENTIK_CLIENT_ID
         svc_app.AUTHENTIK_CLIENT_ID = ""
         try:
@@ -399,6 +425,7 @@ class TestJWTTokens:
         }
 
         import capauth.service.app as svc_app
+
         original_id = svc_app.AUTHENTIK_CLIENT_ID
         original_secret = svc_app.AUTHENTIK_CLIENT_SECRET
         svc_app.AUTHENTIK_CLIENT_ID = "test-client-id"
@@ -411,8 +438,12 @@ class TestJWTTokens:
         mock_client.get = AsyncMock(return_value=fake_userinfo_resp)
 
         try:
-            with patch("capauth.service.app._get_oidc_config", AsyncMock(return_value=fake_oidc_cfg)), \
-                 patch("httpx.AsyncClient", return_value=mock_client):
+            with (
+                patch(
+                    "capauth.service.app._get_oidc_config", AsyncMock(return_value=fake_oidc_cfg)
+                ),
+                patch("httpx.AsyncClient", return_value=mock_client),
+            ):
                 resp = self.client.get("/capauth/v1/callback?code=authcode123")
 
             assert resp.status_code == 200
@@ -434,6 +465,7 @@ class TestJWTTokens:
 
         # Issue a challenge
         import capauth.authentik.nonce_store as ns
+
         ns._MEM_CACHE.clear()
         nonce_record = ns.issue(FAKE_FP, client_nonce_echo="dGVzdA==")
         nonce_id = nonce_record["nonce"]
@@ -443,13 +475,18 @@ class TestJWTTokens:
         from unittest.mock import patch
 
         fake_claims = {"sub": FAKE_FP, "capauth_fingerprint": FAKE_FP, "amr": ["pgp"]}
-        with patch("capauth.service.app.verify_auth_response", return_value=(True, "", fake_claims)):
-            resp = self.client.post("/capauth/v1/verify", json={
-                "fingerprint": FAKE_FP,
-                "nonce": nonce_id,
-                "nonce_signature": "fake-will-be-patched",
-                "public_key": FAKE_PUB,
-            })
+        with patch(
+            "capauth.service.app.verify_auth_response", return_value=(True, "", fake_claims)
+        ):
+            resp = self.client.post(
+                "/capauth/v1/verify",
+                json={
+                    "fingerprint": FAKE_FP,
+                    "nonce": nonce_id,
+                    "nonce_signature": "fake-will-be-patched",
+                    "public_key": FAKE_PUB,
+                },
+            )
 
         assert resp.status_code == 200
         result = resp.json()
@@ -480,6 +517,7 @@ class TestQRLogin:
 
         import capauth.service.app as svc_app
         from capauth.service.keystore import KeyStore
+
         if svc_app._keystore is not None:
             try:
                 svc_app._keystore.close()
@@ -490,6 +528,7 @@ class TestQRLogin:
         svc_app.JWT_SECRET = "test-qr-jwt-secret-at-least-32-chars!"
 
         from fastapi.testclient import TestClient
+
         self.client = TestClient(svc_app.app)
         self.svc_app = svc_app
 
@@ -574,7 +613,9 @@ class TestQRLogin:
 
         # Mobile: submit signed response (bypass real PGP verification)
         fake_claims = {"sub": "F" * 40, "capauth_fingerprint": "F" * 40, "amr": ["pgp", "qr"]}
-        with patch("capauth.service.app.verify_auth_response", return_value=(True, "", fake_claims)):
+        with patch(
+            "capauth.service.app.verify_auth_response", return_value=(True, "", fake_claims)
+        ):
             verify_resp = self.client.post(
                 f"/capauth/v1/qr-verify/{nonce_id}",
                 json={
@@ -594,6 +635,7 @@ class TestQRLogin:
 
         # Verify the token is a valid JWT
         import jwt as pyjwt
+
         decoded = pyjwt.decode(
             status["access_token"],
             "test-qr-jwt-secret-at-least-32-chars!",
@@ -612,7 +654,9 @@ class TestQRLogin:
         nonce_id = challenge["nonce"]
 
         fake_claims = {"sub": "G" * 40}
-        with patch("capauth.service.app.verify_auth_response", return_value=(True, "", fake_claims)):
+        with patch(
+            "capauth.service.app.verify_auth_response", return_value=(True, "", fake_claims)
+        ):
             self.client.post(
                 f"/capauth/v1/qr-verify/{nonce_id}",
                 json={"fingerprint": "G" * 40, "nonce": nonce_id, "nonce_signature": "sig"},

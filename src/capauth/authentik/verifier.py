@@ -106,6 +106,7 @@ def _verify_with_gnupg(payload: bytes, signature_armor: str, public_key_armor: s
     """
     import tempfile as _tmp
     import os as _os
+
     try:
         import gnupg
     except ImportError:

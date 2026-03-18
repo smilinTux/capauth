@@ -403,6 +403,7 @@ class ForgejoAuthFlow:
         if method == "S256":
             digest = hashlib.sha256(code_verifier.encode("ascii")).digest()
             import base64
+
             computed = base64.urlsafe_b64encode(digest).rstrip(b"=").decode()
             return hmac.compare_digest(computed, code_challenge)
         return False

@@ -266,6 +266,7 @@ def _service_is_up() -> bool:
     """Return True if the CapAuth service responds on SERVICE_URL."""
     try:
         import httpx
+
         r = httpx.get(f"{SERVICE_URL}/capauth/v1/status", timeout=2.0)
         return r.status_code == 200
     except Exception:
@@ -289,6 +290,7 @@ class TestLiveProxyBehavior:
     def test_status_endpoint(self):
         """Service /status must return healthy=true."""
         import httpx
+
         r = httpx.get(f"{SERVICE_URL}/capauth/v1/status")
         assert r.status_code == 200
         data = r.json()
@@ -297,6 +299,7 @@ class TestLiveProxyBehavior:
     def test_oidc_discovery_for_nextcloud(self):
         """OIDC discovery must include issuer and token_endpoint."""
         import httpx
+
         r = httpx.get(f"{SERVICE_URL}/.well-known/openid-configuration")
         assert r.status_code == 200
         data = r.json()
@@ -306,12 +309,16 @@ class TestLiveProxyBehavior:
     def test_challenge_returns_nonce(self):
         """Challenge endpoint must return a nonce for a valid fingerprint."""
         import httpx
+
         fake_fp = "A" * 40
-        r = httpx.post(f"{SERVICE_URL}/capauth/v1/challenge", json={
-            "capauth_version": "1.0",
-            "fingerprint": fake_fp,
-            "client_nonce": "dGVzdA==",
-        })
+        r = httpx.post(
+            f"{SERVICE_URL}/capauth/v1/challenge",
+            json={
+                "capauth_version": "1.0",
+                "fingerprint": fake_fp,
+                "client_nonce": "dGVzdA==",
+            },
+        )
         assert r.status_code == 200
         data = r.json()
         assert "nonce" in data
@@ -319,48 +326,62 @@ class TestLiveProxyBehavior:
     def test_verify_rejects_bad_signature(self):
         """Verify endpoint must return 401 for a bogus signature."""
         import httpx
+
         # Issue a challenge first
         fake_fp = "B" * 40
-        cr = httpx.post(f"{SERVICE_URL}/capauth/v1/challenge", json={
-            "capauth_version": "1.0",
-            "fingerprint": fake_fp,
-            "client_nonce": "dGVzdA==",
-        })
+        cr = httpx.post(
+            f"{SERVICE_URL}/capauth/v1/challenge",
+            json={
+                "capauth_version": "1.0",
+                "fingerprint": fake_fp,
+                "client_nonce": "dGVzdA==",
+            },
+        )
         assert cr.status_code == 200
         nonce = cr.json()["nonce"]
 
         # Verify with a garbage signature
-        vr = httpx.post(f"{SERVICE_URL}/capauth/v1/verify", json={
-            "capauth_version": "1.0",
-            "fingerprint": fake_fp,
-            "nonce": nonce,
-            "nonce_signature": "not-a-valid-pgp-signature",
-            "claims": {},
-            "claims_signature": "",
-            "public_key": "",
-        })
+        vr = httpx.post(
+            f"{SERVICE_URL}/capauth/v1/verify",
+            json={
+                "capauth_version": "1.0",
+                "fingerprint": fake_fp,
+                "nonce": nonce,
+                "nonce_signature": "not-a-valid-pgp-signature",
+                "claims": {},
+                "claims_signature": "",
+                "public_key": "",
+            },
+        )
         assert vr.status_code == 401
 
     def test_verify_rejects_wrong_fingerprint(self):
         """Verify must reject when fingerprint in body differs from challenge."""
         import httpx
+
         fp1 = "C" * 40
         fp2 = "D" * 40
-        cr = httpx.post(f"{SERVICE_URL}/capauth/v1/challenge", json={
-            "capauth_version": "1.0",
-            "fingerprint": fp1,
-            "client_nonce": "dGVzdA==",
-        })
+        cr = httpx.post(
+            f"{SERVICE_URL}/capauth/v1/challenge",
+            json={
+                "capauth_version": "1.0",
+                "fingerprint": fp1,
+                "client_nonce": "dGVzdA==",
+            },
+        )
         assert cr.status_code == 200
         nonce = cr.json()["nonce"]
 
-        vr = httpx.post(f"{SERVICE_URL}/capauth/v1/verify", json={
-            "capauth_version": "1.0",
-            "fingerprint": fp2,
-            "nonce": nonce,
-            "nonce_signature": "junk",
-            "claims": {},
-            "claims_signature": "",
-            "public_key": "",
-        })
+        vr = httpx.post(
+            f"{SERVICE_URL}/capauth/v1/verify",
+            json={
+                "capauth_version": "1.0",
+                "fingerprint": fp2,
+                "nonce": nonce,
+                "nonce_signature": "junk",
+                "claims": {},
+                "claims_signature": "",
+                "public_key": "",
+            },
+        )
         assert vr.status_code in (400, 401, 422)

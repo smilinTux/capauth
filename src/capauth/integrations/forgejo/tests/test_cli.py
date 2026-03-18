@@ -22,7 +22,9 @@ def config() -> ForgejoConfig:
 
 
 class TestCmdConfig:
-    def test_prints_app_ini_snippet(self, config: ForgejoConfig, capsys: pytest.CaptureFixture) -> None:
+    def test_prints_app_ini_snippet(
+        self, config: ForgejoConfig, capsys: pytest.CaptureFixture
+    ) -> None:
         rc = cmd_config(config)
         out = capsys.readouterr().out
         assert "[oauth2.source.capauth]" in out
@@ -61,7 +63,9 @@ class TestCmdPing:
 
 
 class TestMain:
-    def test_config_subcommand(self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture) -> None:
+    def test_config_subcommand(
+        self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+    ) -> None:
         monkeypatch.setenv("CAPAUTH_BASE_URL", "https://auth.example.com")
         monkeypatch.setenv("CAPAUTH_JWT_SECRET", "secret")
         monkeypatch.setenv("FORGEJO_BASE_URL", "https://git.example.com")

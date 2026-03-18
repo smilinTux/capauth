@@ -90,12 +90,17 @@ class TestRegisterCommand:
             result = runner.invoke(
                 main,
                 [
-                    "--home", str(tmp_path),
+                    "--home",
+                    str(tmp_path),
                     "register",
-                    "--name", "TestKing",
-                    "--org", "smilintux",
-                    "--title", "King",
-                    "--role", "Builder",
+                    "--name",
+                    "TestKing",
+                    "--org",
+                    "smilintux",
+                    "--title",
+                    "King",
+                    "--role",
+                    "Builder",
                 ],
             )
             assert result.exit_code == 0, result.output
@@ -113,13 +118,19 @@ class TestRegisterCommand:
             result = runner.invoke(
                 main,
                 [
-                    "--home", str(tmp_path),
+                    "--home",
+                    str(tmp_path),
                     "register",
-                    "--name", "Lumina",
-                    "--type", "ai",
-                    "--title", "Queen",
-                    "--role", "Partner",
-                    "--human-partner", "Chef",
+                    "--name",
+                    "Lumina",
+                    "--type",
+                    "ai",
+                    "--title",
+                    "Queen",
+                    "--role",
+                    "Partner",
+                    "--human-partner",
+                    "Chef",
                 ],
             )
             assert result.exit_code == 0, result.output
@@ -131,11 +142,15 @@ class TestRegisterCommand:
             result = runner.invoke(
                 main,
                 [
-                    "--home", str(tmp_path),
+                    "--home",
+                    str(tmp_path),
                     "register",
-                    "--name", "Chef",
-                    "--projects", "SKForge,Cloud 9,SKComm",
-                    "--motto", "stayCuriousANDkeepSmilin",
+                    "--name",
+                    "Chef",
+                    "--projects",
+                    "SKForge,Cloud 9,SKComm",
+                    "--motto",
+                    "stayCuriousANDkeepSmilin",
                 ],
             )
             assert result.exit_code == 0, result.output
@@ -154,9 +169,11 @@ class TestRegisterCommand:
             result = runner.invoke(
                 main,
                 [
-                    "--home", str(tmp_path),
+                    "--home",
+                    str(tmp_path),
                     "register",
-                    "--name", "Nobody",
+                    "--name",
+                    "Nobody",
                 ],
             )
             assert result.exit_code == 1
@@ -169,9 +186,11 @@ class TestRegisterCommand:
             result = runner.invoke(
                 main,
                 [
-                    "--home", str(tmp_path),
+                    "--home",
+                    str(tmp_path),
                     "register",
-                    "--name", "Resilient",
+                    "--name",
+                    "Resilient",
                 ],
             )
             assert result.exit_code == 0

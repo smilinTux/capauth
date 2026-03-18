@@ -92,9 +92,7 @@ class PeerMesh:
                 logger.warning("Failed to start backend %s: %s", backend.name, exc)
 
         self._running = True
-        logger.info(
-            "Mesh started with %d backends for %s", len(self._backends), self.name
-        )
+        logger.info("Mesh started with %d backends for %s", len(self._backends), self.name)
 
     def stop(self) -> None:
         """Stop all discovery backends."""

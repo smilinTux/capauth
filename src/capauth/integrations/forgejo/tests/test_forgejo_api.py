@@ -34,7 +34,9 @@ def _mock_transport(routes: dict[tuple[str, str], tuple[int, Any]]) -> httpx.Moc
         if key in routes:
             status, body = routes[key]
             content = json.dumps(body).encode() if not isinstance(body, bytes) else body
-            return httpx.Response(status, content=content, headers={"Content-Type": "application/json"})
+            return httpx.Response(
+                status, content=content, headers={"Content-Type": "application/json"}
+            )
         return httpx.Response(404, content=b'{"message":"not found"}')
 
     return httpx.MockTransport(handler)

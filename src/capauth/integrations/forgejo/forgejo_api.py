@@ -168,6 +168,7 @@ class ForgejoAPIClient:
             The created user object from Forgejo.
         """
         import secrets as _secrets
+
         payload: dict[str, Any] = {
             "username": username,
             "email": email,

@@ -26,6 +26,7 @@ NONCE = "test-nonce-uuid-1234-5678"
 # ZK Invariant: server sub = fingerprint ONLY
 # ---------------------------------------------------------------------------
 
+
 class TestServerSubIsFingerprint:
     """The ``sub`` claim must always be the PGP fingerprint."""
 
@@ -60,6 +61,7 @@ class TestServerSubIsFingerprint:
 # ---------------------------------------------------------------------------
 # ZK Invariant: no PII stored — claims come from client only
 # ---------------------------------------------------------------------------
+
 
 class TestClientAssertedClaims:
     """Claims originate from the client. Server maps but does not persist."""
@@ -114,6 +116,7 @@ class TestClientAssertedClaims:
 # ZK Invariant: claims bundle is nonce-bound (replay protection)
 # ---------------------------------------------------------------------------
 
+
 class TestClaimsBundleProtocol:
     """The canonical claims payload binds claims to a specific nonce."""
 
@@ -139,14 +142,8 @@ class TestClaimsBundleProtocol:
 
     def test_claims_sorted_for_determinism(self):
         """Same claims in different order produce identical payload."""
-        p1 = canonical_claims_payload(
-            FINGERPRINT, NONCE,
-            {"b": 2, "a": 1}
-        )
-        p2 = canonical_claims_payload(
-            FINGERPRINT, NONCE,
-            {"a": 1, "b": 2}
-        )
+        p1 = canonical_claims_payload(FINGERPRINT, NONCE, {"b": 2, "a": 1})
+        p2 = canonical_claims_payload(FINGERPRINT, NONCE, {"a": 1, "b": 2})
         assert p1 == p2
 
     def test_different_claims_different_payload(self):
@@ -168,6 +165,7 @@ class TestClaimsBundleProtocol:
 # ---------------------------------------------------------------------------
 # ZK Invariant: preferred_username fallback from fingerprint
 # ---------------------------------------------------------------------------
+
 
 class TestPreferredUsernameFallback:
     """When no name is claimed, username derives from fingerprint."""
@@ -194,6 +192,7 @@ class TestPreferredUsernameFallback:
 # ---------------------------------------------------------------------------
 # ZK Invariant: scope-based claim filtering
 # ---------------------------------------------------------------------------
+
 
 class TestScopeFiltering:
     """Claims only appear in token if the corresponding scope is requested."""
@@ -243,6 +242,7 @@ class TestScopeFiltering:
 # ---------------------------------------------------------------------------
 # AI Agent ZK Profile
 # ---------------------------------------------------------------------------
+
 
 class TestAIAgentProfile:
     """AI agents assert their identity the same way humans do."""

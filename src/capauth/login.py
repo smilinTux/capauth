@@ -85,7 +85,8 @@ def _gpg_sign(data: bytes, fingerprint: str) -> str:
                 "--yes",
                 "--detach-sign",
                 "--armor",
-                "-u", fingerprint,
+                "-u",
+                fingerprint,
                 tmp_path,
             ],
             capture_output=True,
@@ -121,9 +122,7 @@ def _gpg_export_pubkey(fingerprint: str) -> str:
         text=True,
     )
     if result.returncode != 0 or not result.stdout.strip():
-        raise CapAuthError(
-            f"gpg export failed for {fingerprint[:8]}: {result.stderr.strip()}"
-        )
+        raise CapAuthError(f"gpg export failed for {fingerprint[:8]}: {result.stderr.strip()}")
     return result.stdout
 
 
@@ -341,6 +340,7 @@ def _load_identity(
         if profile_json.exists():
             try:
                 import json as _json
+
                 pdata = _json.loads(profile_json.read_text(encoding="utf-8"))
                 yml_fingerprint = pdata.get("key_info", {}).get("fingerprint")
             except Exception:
@@ -354,8 +354,10 @@ def _load_identity(
             try:
                 pub_armor = _self._gpg_export_pubkey(yml_fingerprint)
                 _fp = yml_fingerprint
+
                 def sign_fn(data: bytes, _fp=_fp) -> str:  # noqa: E306
                     return _self._gpg_sign(data, _fp)
+
                 return yml_fingerprint, pub_armor, sign_fn
             except CapAuthError:
                 pass  # fall through to PGPy
@@ -370,14 +372,17 @@ def _load_identity(
             try:
                 pub_armor = _self._gpg_export_pubkey(fingerprint)
                 _fp = fingerprint
+
                 def sign_fn(data: bytes, _fp=_fp) -> str:  # noqa: E306
                     return _self._gpg_sign(data, _fp)
+
                 return fingerprint, pub_armor, sign_fn
             except CapAuthError:
                 pass
 
         # PGPy path
         from .crypto import get_backend
+
         private_key_armor = Path(profile.key_info.private_key_path).read_text(encoding="utf-8")
         public_key_armor = Path(profile.key_info.public_key_path).read_text(encoding="utf-8")
         backend = get_backend(profile.crypto_backend)

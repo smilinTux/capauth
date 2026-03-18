@@ -98,13 +98,17 @@ class TestMapClaimsGroups:
 class TestMapClaimsScopes:
     def test_scope_filtering_excludes_profile_without_scope(self):
         """Without profile scope, name and picture are excluded."""
-        result = map_claims(FP, {"name": "Chef", "email": "x@y.com"}, requested_scopes=["openid", "email"])
+        result = map_claims(
+            FP, {"name": "Chef", "email": "x@y.com"}, requested_scopes=["openid", "email"]
+        )
         assert "name" not in result
         assert "email" in result
 
     def test_scope_filtering_excludes_email_without_scope(self):
         """Without email scope, email is excluded."""
-        result = map_claims(FP, {"name": "Chef", "email": "x@y.com"}, requested_scopes=["openid", "profile"])
+        result = map_claims(
+            FP, {"name": "Chef", "email": "x@y.com"}, requested_scopes=["openid", "profile"]
+        )
         assert "email" not in result
         assert "name" in result
 

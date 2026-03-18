@@ -106,7 +106,9 @@ class TestAuthCodeIssuance:
         with pytest.raises(ValueError, match="No pending session"):
             flow.issue_auth_code("bad-state", FINGERPRINT, CLAIMS)
 
-    def test_issue_code_expired_session(self, flow: ForgejoAuthFlow, config: ForgejoConfig) -> None:
+    def test_issue_code_expired_session(
+        self, flow: ForgejoAuthFlow, config: ForgejoConfig
+    ) -> None:
         cfg = ForgejoConfig(
             capauth_base_url=config.capauth_base_url,
             capauth_jwt_secret=config.capauth_jwt_secret,
@@ -149,7 +151,9 @@ class TestCodeExchange:
 
     def test_exchange_jwt_payload(self, flow: ForgejoAuthFlow, config: ForgejoConfig) -> None:
         code = self._issue_code(flow)
-        tokens = flow.exchange_code(code=code, client_id="capauth", client_secret="x", redirect_uri=REDIRECT_URI)
+        tokens = flow.exchange_code(
+            code=code, client_id="capauth", client_secret="x", redirect_uri=REDIRECT_URI
+        )
         payload = jwt.decode(
             tokens["access_token"],
             config.capauth_jwt_secret,
@@ -163,24 +167,36 @@ class TestCodeExchange:
 
     def test_exchange_invalid_code(self, flow: ForgejoAuthFlow) -> None:
         with pytest.raises(ValueError, match="invalid_grant"):
-            flow.exchange_code(code="bad-code", client_id="capauth", client_secret="x", redirect_uri=REDIRECT_URI)
+            flow.exchange_code(
+                code="bad-code", client_id="capauth", client_secret="x", redirect_uri=REDIRECT_URI
+            )
 
     def test_exchange_wrong_client(self, flow: ForgejoAuthFlow) -> None:
         code = self._issue_code(flow)
         with pytest.raises(ValueError, match="invalid_client"):
-            flow.exchange_code(code=code, client_id="wrong", client_secret="x", redirect_uri=REDIRECT_URI)
+            flow.exchange_code(
+                code=code, client_id="wrong", client_secret="x", redirect_uri=REDIRECT_URI
+            )
 
     def test_exchange_redirect_mismatch(self, flow: ForgejoAuthFlow) -> None:
         code = self._issue_code(flow)
         with pytest.raises(ValueError, match="redirect_uri mismatch"):
-            flow.exchange_code(code=code, client_id="capauth", client_secret="x",
-                               redirect_uri="https://evil.example.com/callback")
+            flow.exchange_code(
+                code=code,
+                client_id="capauth",
+                client_secret="x",
+                redirect_uri="https://evil.example.com/callback",
+            )
 
     def test_code_is_single_use_on_exchange(self, flow: ForgejoAuthFlow) -> None:
         code = self._issue_code(flow)
-        flow.exchange_code(code=code, client_id="capauth", client_secret="x", redirect_uri=REDIRECT_URI)
+        flow.exchange_code(
+            code=code, client_id="capauth", client_secret="x", redirect_uri=REDIRECT_URI
+        )
         with pytest.raises(ValueError, match="invalid_grant"):
-            flow.exchange_code(code=code, client_id="capauth", client_secret="x", redirect_uri=REDIRECT_URI)
+            flow.exchange_code(
+                code=code, client_id="capauth", client_secret="x", redirect_uri=REDIRECT_URI
+            )
 
 
 class TestPKCE:

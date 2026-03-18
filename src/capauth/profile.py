@@ -193,9 +193,7 @@ def load_profile(base_dir: Optional[Path] = None) -> SovereignProfile:
     profile_path = base / IDENTITY_DIR / PROFILE_FILENAME
 
     if not profile_path.exists():
-        raise ProfileError(
-            f"No profile found at {profile_path}. Run 'capauth init' first."
-        )
+        raise ProfileError(f"No profile found at {profile_path}. Run 'capauth init' first.")
 
     try:
         raw = profile_path.read_text(encoding="utf-8")

@@ -37,9 +37,7 @@ def pgpy_backend():
 @pytest.fixture
 def rsa_keybundle(pgpy_backend) -> "KeyBundle":
     """Generate an RSA-4096 test keypair (cached per test)."""
-    return pgpy_backend.generate_keypair(
-        TEST_NAME, TEST_EMAIL, TEST_PASSPHRASE, Algorithm.RSA4096
-    )
+    return pgpy_backend.generate_keypair(TEST_NAME, TEST_EMAIL, TEST_PASSPHRASE, Algorithm.RSA4096)
 
 
 @pytest.fixture

@@ -68,9 +68,7 @@ class TestPGPyBackendSignVerify:
         bundle_a = pgpy_backend.generate_keypair(
             "Alice", "alice@test.io", "pass-a", Algorithm.RSA4096
         )
-        bundle_b = pgpy_backend.generate_keypair(
-            "Bob", "bob@test.io", "pass-b", Algorithm.RSA4096
-        )
+        bundle_b = pgpy_backend.generate_keypair("Bob", "bob@test.io", "pass-b", Algorithm.RSA4096)
 
         data = b"alice's message"
         sig = pgpy_backend.sign(data, bundle_a.private_armor, "pass-a")

@@ -274,9 +274,7 @@ class TestPeerMesh:
         assert m.remove_peer("NONEXISTENT") is False
 
     def test_mesh_status(self, my_fingerprint, mesh_home, peer_alice):
-        m = PeerMesh(
-            fingerprint=my_fingerprint, name="TestAgent", base_dir=mesh_home
-        )
+        m = PeerMesh(fingerprint=my_fingerprint, name="TestAgent", base_dir=mesh_home)
         m.add_backend(MockBackend())
         m.add_peer(peer_alice)
 

@@ -38,8 +38,8 @@ _B58_ALPHABET = b"123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
 class DIDTier(str, Enum):
     """DID document privacy tier."""
 
-    KEY = "key"            # Tier 1: did:key — self-contained, no infrastructure
-    WEB_MESH = "mesh"      # Tier 2: did:web via Tailscale Serve — mesh-private
+    KEY = "key"  # Tier 1: did:key — self-contained, no infrastructure
+    WEB_MESH = "mesh"  # Tier 2: did:web via Tailscale Serve — mesh-private
     WEB_PUBLIC = "public"  # Tier 3: did:web:skworld.io — public, minimal
 
 
@@ -49,11 +49,11 @@ class DIDContext:
 
     fingerprint: str
     name: str
-    entity_type: str        # "ai", "human", "organization"
+    entity_type: str  # "ai", "human", "organization"
     email: Optional[str]
-    public_key_armor: str   # ASCII-armored PGP public key (read-only)
-    jwk: dict               # JWK representation of the public key
-    did_key_id: str         # did:key:z<base58btc>
+    public_key_armor: str  # ASCII-armored PGP public key (read-only)
+    jwk: dict  # JWK representation of the public key
+    did_key_id: str  # did:key:z<base58btc>
     capabilities: list[str] = field(default_factory=list)
     vibe: Optional[str] = None
     core_traits: list[str] = field(default_factory=list)
@@ -249,11 +249,15 @@ class DIDDocumentGenerator:
             der_bytes = _rsa_numbers_to_der(n, e)
             did_key_id = _compute_did_key(der_bytes)
         except Exception as exc:
-            logger.warning("RSA extraction failed (%s) — generating fingerprint-based placeholder", exc)
+            logger.warning(
+                "RSA extraction failed (%s) — generating fingerprint-based placeholder", exc
+            )
             fp_clean = profile.key_info.fingerprint.replace(" ", "")
-            fp_bytes = bytes.fromhex(fp_clean) if len(fp_clean) >= 2 and all(
-                c in "0123456789abcdefABCDEF" for c in fp_clean
-            ) else fp_clean.encode()
+            fp_bytes = (
+                bytes.fromhex(fp_clean)
+                if len(fp_clean) >= 2 and all(c in "0123456789abcdefABCDEF" for c in fp_clean)
+                else fp_clean.encode()
+            )
             did_key_id = f"did:key:z{_b58encode(fp_bytes)}"
             jwk = {
                 "kty": "RSA",
@@ -269,6 +273,7 @@ class DIDDocumentGenerator:
         if soul_path.exists():
             try:
                 import yaml  # type: ignore[import]
+
                 soul_data = yaml.safe_load(soul_path.read_text(encoding="utf-8")) or {}
                 vibe = soul_data.get("vibe")
                 core_traits = soul_data.get("core_traits", [])[:5]
@@ -294,6 +299,7 @@ class DIDDocumentGenerator:
         if config_path.exists():
             try:
                 import yaml as _yaml
+
                 cfg = _yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
                 if "publish_to_skworld" in cfg:
                     publish_to_skworld = bool(cfg["publish_to_skworld"])
@@ -405,10 +411,14 @@ class DIDDocumentGenerator:
         """
         ctx = self._ctx
 
-        also_known_as = [x for x in [
-            f"capauth:{ctx.email}" if ctx.email else None,
-            f"capauth:{ctx.fingerprint}",
-        ] if x]
+        also_known_as = [
+            x
+            for x in [
+                f"capauth:{ctx.email}" if ctx.email else None,
+                f"capauth:{ctx.fingerprint}",
+            ]
+            if x
+        ]
 
         card: dict[str, Any] = {
             "card_type": "sovereign_identity",
@@ -419,8 +429,7 @@ class DIDDocumentGenerator:
                 "email": ctx.email,
                 "fingerprint": ctx.fingerprint,
                 "capauth_uri": (
-                    f"capauth:{ctx.email}" if ctx.email
-                    else f"capauth:{ctx.fingerprint}"
+                    f"capauth:{ctx.email}" if ctx.email else f"capauth:{ctx.fingerprint}"
                 ),
             },
             "did_anchor": {
@@ -459,10 +468,14 @@ class DIDDocumentGenerator:
         """Tier 1: self-contained did:key document."""
         did_id = ctx.did_key_id
         vm_id = self._vm_id(did_id)
-        also_known_as = [x for x in [
-            f"capauth:{ctx.email}" if ctx.email else None,
-            f"capauth:{ctx.fingerprint}",
-        ] if x]
+        also_known_as = [
+            x
+            for x in [
+                f"capauth:{ctx.email}" if ctx.email else None,
+                f"capauth:{ctx.fingerprint}",
+            ]
+            if x
+        ]
 
         return {
             "@context": [_W3C_DID_CONTEXT, _JWS2020_CONTEXT],

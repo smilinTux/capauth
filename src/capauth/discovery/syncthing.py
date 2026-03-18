@@ -218,9 +218,7 @@ class SyncthingDiscovery(DiscoveryBackend):
         device_ids: set[str] = set()
 
         # Always fetch connections — includes connected status
-        conns = _syncthing_get(
-            f"{self._api_url}/rest/system/connections", self._api_key
-        )
+        conns = _syncthing_get(f"{self._api_url}/rest/system/connections", self._api_key)
         if isinstance(conns, dict):
             for device_id, info in conns.get("connections", {}).items():
                 if self._connected_only and not info.get("connected", False):
@@ -229,9 +227,7 @@ class SyncthingDiscovery(DiscoveryBackend):
 
         if not self._connected_only and not device_ids:
             # Fallback: read all configured devices
-            devices = _syncthing_get(
-                f"{self._api_url}/rest/config/devices", self._api_key
-            )
+            devices = _syncthing_get(f"{self._api_url}/rest/config/devices", self._api_key)
             if isinstance(devices, list):
                 for d in devices:
                     did = d.get("deviceID", "")

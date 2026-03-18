@@ -22,8 +22,12 @@ from capauth.authentik.verifier import (
 class TestCanonicalPayloads:
     def test_nonce_payload_is_deterministic(self):
         """Same inputs always produce the same canonical nonce bytes."""
-        p1 = canonical_nonce_payload("uuid-1", "abc=", "2026-02-24T12:00:00Z", "svc.io", "2026-02-24T12:01:00Z")
-        p2 = canonical_nonce_payload("uuid-1", "abc=", "2026-02-24T12:00:00Z", "svc.io", "2026-02-24T12:01:00Z")
+        p1 = canonical_nonce_payload(
+            "uuid-1", "abc=", "2026-02-24T12:00:00Z", "svc.io", "2026-02-24T12:01:00Z"
+        )
+        p2 = canonical_nonce_payload(
+            "uuid-1", "abc=", "2026-02-24T12:00:00Z", "svc.io", "2026-02-24T12:01:00Z"
+        )
         assert p1 == p2
 
     def test_nonce_payload_contains_header(self):
@@ -57,7 +61,10 @@ class TestSignVerify:
     @pytest.fixture
     def key_bundle(self, pgpy_backend):
         from capauth.models import Algorithm
-        return pgpy_backend.generate_keypair(TEST_NAME, TEST_EMAIL, TEST_PASSPHRASE, Algorithm.RSA4096)
+
+        return pgpy_backend.generate_keypair(
+            TEST_NAME, TEST_EMAIL, TEST_PASSPHRASE, Algorithm.RSA4096
+        )
 
     def test_nonce_signature_round_trip(self, pgpy_backend, key_bundle):
         """A nonce signature verifies against the matching public key."""
@@ -75,7 +82,10 @@ class TestSignVerify:
     def test_nonce_signature_wrong_key_fails(self, pgpy_backend, key_bundle):
         """A signature verifies only against the signing key, not another key."""
         from capauth.models import Algorithm
-        other_bundle = pgpy_backend.generate_keypair("Other", "other@x.io", TEST_PASSPHRASE, Algorithm.RSA4096)
+
+        other_bundle = pgpy_backend.generate_keypair(
+            "Other", "other@x.io", TEST_PASSPHRASE, Algorithm.RSA4096
+        )
         payload = canonical_nonce_payload("uuid", "echo=", "ts", "svc", "exp")
         sig = pgpy_backend.sign(payload, key_bundle.private_armor, TEST_PASSPHRASE)
         assert not verify_nonce_signature(payload, sig, other_bundle.public_armor)
@@ -93,7 +103,9 @@ class TestSignVerify:
         payload = canonical_claims_payload(key_bundle.fingerprint, "nonce-uuid", claims)
         sig = pgpy_backend.sign(payload, key_bundle.private_armor, TEST_PASSPHRASE)
         tampered_claims = {"name": "Hacker"}
-        tampered_payload = canonical_claims_payload(key_bundle.fingerprint, "nonce-uuid", tampered_claims)
+        tampered_payload = canonical_claims_payload(
+            key_bundle.fingerprint, "nonce-uuid", tampered_claims
+        )
         assert not verify_claims_signature(tampered_payload, sig, key_bundle.public_armor)
 
     def test_fingerprint_from_armor_returns_correct_fp(self, pgpy_backend, key_bundle):

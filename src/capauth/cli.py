@@ -50,9 +50,7 @@ def main(ctx: click.Context, capauth_home: Optional[str]) -> None:
 
 @main.command()
 @click.option("--name", "-n", required=True, prompt="Your name", help="Display name.")
-@click.option(
-    "--email", "-e", required=True, prompt="Your email", help="Email or AI identifier."
-)
+@click.option("--email", "-e", required=True, prompt="Your email", help="Email or AI identifier.")
 @click.option(
     "--passphrase",
     "-p",
@@ -239,9 +237,7 @@ def verify_peer(ctx: click.Context, pubkey: str, passphrase: str) -> None:
         challenge = create_challenge(p.key_info.fingerprint, peer_fp)
 
         priv_armor = Path(p.key_info.private_key_path).read_text(encoding="utf-8")
-        response = respond_to_challenge(
-            challenge, priv_armor, passphrase, p.crypto_backend
-        )
+        response = respond_to_challenge(challenge, priv_armor, passphrase, p.crypto_backend)
 
         verified = verify_challenge(challenge, response, my_pub, p.crypto_backend)
 
@@ -337,9 +333,7 @@ def pma_request(ctx: click.Context, reason: str, passphrase: str) -> None:
     help="Steward passphrase to countersign.",
 )
 @click.pass_context
-def pma_approve(
-    ctx: click.Context, request_id: str, capabilities: str, passphrase: str
-) -> None:
+def pma_approve(ctx: click.Context, request_id: str, capabilities: str, passphrase: str) -> None:
     """Approve a membership request (steward only).
 
     Reviews and countersigns a pending request, issuing a
@@ -411,9 +405,7 @@ def pma_status(ctx: click.Context, json_out: bool) -> None:
         else:
             emoji = "[bold yellow]NOT A MEMBER[/]"
 
-        table = Table(
-            title="PMA Membership Status", show_header=False, border_style="cyan"
-        )
+        table = Table(title="PMA Membership Status", show_header=False, border_style="cyan")
         table.add_column("Field", style="bold")
         table.add_column("Value")
 
@@ -438,9 +430,7 @@ def pma_status(ctx: click.Context, json_out: bool) -> None:
     help="Steward's public key for signature verification.",
 )
 @click.pass_context
-def pma_verify(
-    ctx: click.Context, claim_file: str, steward_pubkey: Optional[str]
-) -> None:
+def pma_verify(ctx: click.Context, claim_file: str, steward_pubkey: Optional[str]) -> None:
     """Verify a membership claim.
 
     Checks that the claim is not revoked, capabilities are current,
@@ -691,9 +681,7 @@ def mesh_discover(ctx: click.Context, timeout: int, json_out: bool) -> None:
 
         if json_out:
             click.echo(
-                _json.dumps(
-                    [p.model_dump(mode="json") for p in peers], indent=2, default=str
-                )
+                _json.dumps([p.model_dump(mode="json") for p in peers], indent=2, default=str)
             )
             return
 
@@ -748,9 +736,7 @@ def mesh_peers(ctx: click.Context, verified: bool, json_out: bool) -> None:
 
         if json_out:
             click.echo(
-                _json.dumps(
-                    [p.model_dump(mode="json") for p in peers], indent=2, default=str
-                )
+                _json.dumps([p.model_dump(mode="json") for p in peers], indent=2, default=str)
             )
             return
 
@@ -972,7 +958,11 @@ def login(
         console.print(
             Panel(
                 f"[bold green]Logged into [cyan]{result['service']}[/][/]\n\n"
-                + (f"as [bold]{result.get('name', result['fingerprint'][:8] + '...')}[/]\n" if result.get("name") else "")
+                + (
+                    f"as [bold]{result.get('name', result['fingerprint'][:8] + '...')}[/]\n"
+                    if result.get("name")
+                    else ""
+                )
                 + f"fingerprint: [dim]{result['fingerprint'][:8]}...{result['fingerprint'][-4:]}[/]\n\n"
                 + f"[dim]Token cached at:[/] {result['token_path']}",
                 title="CapAuth Login",
@@ -1061,7 +1051,7 @@ CLIENT_ID                         = {client_id}
 CLIENT_SECRET                     = {client_secret}
 OPENID_CONNECT_AUTO_DISCOVERY_URL = {discovery_url}
 SCOPES                            = openid profile email groups
-ICON_URL                          = {capauth_url.rstrip('/')}/icons/capauth-shield.svg
+ICON_URL                          = {capauth_url.rstrip("/")}/icons/capauth-shield.svg
 
 ; Identity mapping — use PGP fingerprint as the unique username
 USERNAME_CLAIM                    = capauth_fingerprint

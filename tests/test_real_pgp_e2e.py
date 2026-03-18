@@ -34,6 +34,7 @@ AGENT_PUB = Path("~/.skcapstone/identity/agent.pub").expanduser()
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _gpg() -> gnupg.GPG:
     """Return a GPG instance using the system keyring."""
     return gnupg.GPG(gnupghome=GNUPG_HOME)
@@ -64,6 +65,7 @@ def _sign_payload(data: bytes) -> str:
 def _gnupg_verify(data: bytes, sig_armor: str, pub_armor: str) -> bool:
     """Verify a detach-sig using GnuPGBackend (isolated temp keyring)."""
     import tempfile as tmp
+
     gpg = gnupg.GPG(gnupghome=tmp.mkdtemp(prefix="capauth_e2e_"))
     gpg.import_keys(pub_armor)
     with tmp.NamedTemporaryFile(suffix=".sig", delete=False) as sf:
@@ -89,6 +91,7 @@ requires_opus_key = pytest.mark.skipif(
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
+
 
 @pytest.fixture
 def app_client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
@@ -118,6 +121,7 @@ def app_client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     ns._MEM_CACHE.clear()
 
     from fastapi.testclient import TestClient
+
     client = TestClient(svc_app.app)
     yield client, svc_app
 
@@ -134,6 +138,7 @@ def app_client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
 # ---------------------------------------------------------------------------
 # Unit-level: verify GnuPG signing + verification works in isolation
 # ---------------------------------------------------------------------------
+
 
 @requires_opus_key
 class TestGnuPGSigningUnit:
@@ -186,17 +191,22 @@ class TestGnuPGSigningUnit:
 
         # Generate a fresh throw-away keypair
         backend = get_backend()
-        bundle = backend.generate_keypair("Fake User", "fake@example.com", "passphrase", Algorithm.RSA4096)
+        bundle = backend.generate_keypair(
+            "Fake User", "fake@example.com", "passphrase", Algorithm.RSA4096
+        )
 
         payload = b"CAPAUTH_NONCE_V1\nnonce=abc123"
         sig_armor = _sign_payload(payload)
         # Verify against the wrong (fake) key — must fail
-        assert not _gnupg_verify(payload, sig_armor, bundle.public_armor), "wrong key must not verify"
+        assert not _gnupg_verify(payload, sig_armor, bundle.public_armor), (
+            "wrong key must not verify"
+        )
 
 
 # ---------------------------------------------------------------------------
 # Integration: Full HTTP challenge/verify cycle
 # ---------------------------------------------------------------------------
+
 
 @requires_opus_key
 class TestRealPGPEndToEnd:
@@ -209,10 +219,13 @@ class TestRealPGPEndToEnd:
 
         # 1. Request challenge
         client_nonce = base64.b64encode(b"jarvis-real-test-nonce").decode()
-        resp = client.post("/capauth/v1/challenge", json={
-            "fingerprint": OPUS_FINGERPRINT,
-            "client_nonce": client_nonce,
-        })
+        resp = client.post(
+            "/capauth/v1/challenge",
+            json={
+                "fingerprint": OPUS_FINGERPRINT,
+                "client_nonce": client_nonce,
+            },
+        )
         assert resp.status_code == 200, f"Challenge failed: {resp.json()}"
         challenge = resp.json()
 
@@ -221,6 +234,7 @@ class TestRealPGPEndToEnd:
 
         # 2. Build canonical nonce payload and sign it
         from capauth.authentik.verifier import canonical_nonce_payload
+
         nonce_payload = canonical_nonce_payload(
             nonce=challenge["nonce"],
             client_nonce_echo=challenge["client_nonce_echo"],
@@ -231,14 +245,17 @@ class TestRealPGPEndToEnd:
         nonce_sig = _sign_payload(nonce_payload)
 
         # 3. POST verify — first time, include public key for enrollment
-        resp = client.post("/capauth/v1/verify", json={
-            "fingerprint": OPUS_FINGERPRINT,
-            "nonce": challenge["nonce"],
-            "nonce_signature": nonce_sig,
-            "public_key": pub_armor,
-            "claims": {},
-            "claims_signature": "",
-        })
+        resp = client.post(
+            "/capauth/v1/verify",
+            json={
+                "fingerprint": OPUS_FINGERPRINT,
+                "nonce": challenge["nonce"],
+                "nonce_signature": nonce_sig,
+                "public_key": pub_armor,
+                "claims": {},
+                "claims_signature": "",
+            },
+        )
         assert resp.status_code == 200, f"Verify failed: {resp.json()}"
         result = resp.json()
         assert result["authenticated"] is True
@@ -254,13 +271,17 @@ class TestRealPGPEndToEnd:
 
         # First auth — enroll
         client_nonce = base64.b64encode(b"first-auth").decode()
-        challenge_resp = client.post("/capauth/v1/challenge", json={
-            "fingerprint": OPUS_FINGERPRINT,
-            "client_nonce": client_nonce,
-        })
+        challenge_resp = client.post(
+            "/capauth/v1/challenge",
+            json={
+                "fingerprint": OPUS_FINGERPRINT,
+                "client_nonce": client_nonce,
+            },
+        )
         challenge = challenge_resp.json()
 
         from capauth.authentik.verifier import canonical_nonce_payload
+
         nonce_payload = canonical_nonce_payload(
             nonce=challenge["nonce"],
             client_nonce_echo=challenge["client_nonce_echo"],
@@ -268,19 +289,25 @@ class TestRealPGPEndToEnd:
             service=challenge["service"],
             expires=challenge["expires"],
         )
-        client.post("/capauth/v1/verify", json={
-            "fingerprint": OPUS_FINGERPRINT,
-            "nonce": challenge["nonce"],
-            "nonce_signature": _sign_payload(nonce_payload),
-            "public_key": pub_armor,
-        })
+        client.post(
+            "/capauth/v1/verify",
+            json={
+                "fingerprint": OPUS_FINGERPRINT,
+                "nonce": challenge["nonce"],
+                "nonce_signature": _sign_payload(nonce_payload),
+                "public_key": pub_armor,
+            },
+        )
 
         # Second auth — no public_key needed
         client_nonce2 = base64.b64encode(b"second-auth").decode()
-        challenge2_resp = client.post("/capauth/v1/challenge", json={
-            "fingerprint": OPUS_FINGERPRINT,
-            "client_nonce": client_nonce2,
-        })
+        challenge2_resp = client.post(
+            "/capauth/v1/challenge",
+            json={
+                "fingerprint": OPUS_FINGERPRINT,
+                "client_nonce": client_nonce2,
+            },
+        )
         assert challenge2_resp.status_code == 200
         challenge2 = challenge2_resp.json()
 
@@ -291,11 +318,14 @@ class TestRealPGPEndToEnd:
             service=challenge2["service"],
             expires=challenge2["expires"],
         )
-        verify2 = client.post("/capauth/v1/verify", json={
-            "fingerprint": OPUS_FINGERPRINT,
-            "nonce": challenge2["nonce"],
-            "nonce_signature": _sign_payload(nonce_payload2),
-        })
+        verify2 = client.post(
+            "/capauth/v1/verify",
+            json={
+                "fingerprint": OPUS_FINGERPRINT,
+                "nonce": challenge2["nonce"],
+                "nonce_signature": _sign_payload(nonce_payload2),
+            },
+        )
         assert verify2.status_code == 200
         result2 = verify2.json()
         assert result2["authenticated"] is True
@@ -315,10 +345,13 @@ class TestRealPGPEndToEnd:
 
         # Challenge
         client_nonce = base64.b64encode(b"claims-test").decode()
-        challenge = client.post("/capauth/v1/challenge", json={
-            "fingerprint": OPUS_FINGERPRINT,
-            "client_nonce": client_nonce,
-        }).json()
+        challenge = client.post(
+            "/capauth/v1/challenge",
+            json={
+                "fingerprint": OPUS_FINGERPRINT,
+                "client_nonce": client_nonce,
+            },
+        ).json()
 
         from capauth.authentik.verifier import canonical_nonce_payload, canonical_claims_payload
 
@@ -338,14 +371,17 @@ class TestRealPGPEndToEnd:
         )
         claims_sig = _sign_payload(claims_payload)
 
-        resp = client.post("/capauth/v1/verify", json={
-            "fingerprint": OPUS_FINGERPRINT,
-            "nonce": challenge["nonce"],
-            "nonce_signature": nonce_sig,
-            "claims": claims,
-            "claims_signature": claims_sig,
-            "public_key": pub_armor,
-        })
+        resp = client.post(
+            "/capauth/v1/verify",
+            json={
+                "fingerprint": OPUS_FINGERPRINT,
+                "nonce": challenge["nonce"],
+                "nonce_signature": nonce_sig,
+                "claims": claims,
+                "claims_signature": claims_sig,
+                "public_key": pub_armor,
+            },
+        )
         assert resp.status_code == 200, f"Verify with claims failed: {resp.json()}"
         result = resp.json()
         assert result["authenticated"] is True
@@ -363,12 +399,16 @@ class TestRealPGPEndToEnd:
         pub_armor = _export_public_key()
 
         client_nonce = base64.b64encode(b"replay-test").decode()
-        challenge = client.post("/capauth/v1/challenge", json={
-            "fingerprint": OPUS_FINGERPRINT,
-            "client_nonce": client_nonce,
-        }).json()
+        challenge = client.post(
+            "/capauth/v1/challenge",
+            json={
+                "fingerprint": OPUS_FINGERPRINT,
+                "client_nonce": client_nonce,
+            },
+        ).json()
 
         from capauth.authentik.verifier import canonical_nonce_payload
+
         nonce_payload = canonical_nonce_payload(
             nonce=challenge["nonce"],
             client_nonce_echo=challenge["client_nonce_echo"],
@@ -400,17 +440,23 @@ class TestRealPGPEndToEnd:
         pub_armor = _export_public_key()
 
         client_nonce = base64.b64encode(b"invalid-sig-test").decode()
-        challenge = client.post("/capauth/v1/challenge", json={
-            "fingerprint": OPUS_FINGERPRINT,
-            "client_nonce": client_nonce,
-        }).json()
+        challenge = client.post(
+            "/capauth/v1/challenge",
+            json={
+                "fingerprint": OPUS_FINGERPRINT,
+                "client_nonce": client_nonce,
+            },
+        ).json()
 
-        resp = client.post("/capauth/v1/verify", json={
-            "fingerprint": OPUS_FINGERPRINT,
-            "nonce": challenge["nonce"],
-            "nonce_signature": "-----BEGIN PGP MESSAGE-----\nnot-a-real-sig\n-----END PGP MESSAGE-----",
-            "public_key": pub_armor,
-        })
+        resp = client.post(
+            "/capauth/v1/verify",
+            json={
+                "fingerprint": OPUS_FINGERPRINT,
+                "nonce": challenge["nonce"],
+                "nonce_signature": "-----BEGIN PGP MESSAGE-----\nnot-a-real-sig\n-----END PGP MESSAGE-----",
+                "public_key": pub_armor,
+            },
+        )
         assert resp.status_code == 401
 
     def test_status_shows_enrolled_key_after_auth(self, app_client: tuple) -> None:
@@ -424,12 +470,16 @@ class TestRealPGPEndToEnd:
 
         # Enroll via full auth
         client_nonce = base64.b64encode(b"status-test").decode()
-        challenge = client.post("/capauth/v1/challenge", json={
-            "fingerprint": OPUS_FINGERPRINT,
-            "client_nonce": client_nonce,
-        }).json()
+        challenge = client.post(
+            "/capauth/v1/challenge",
+            json={
+                "fingerprint": OPUS_FINGERPRINT,
+                "client_nonce": client_nonce,
+            },
+        ).json()
 
         from capauth.authentik.verifier import canonical_nonce_payload
+
         nonce_payload = canonical_nonce_payload(
             nonce=challenge["nonce"],
             client_nonce_echo=challenge["client_nonce_echo"],
@@ -437,12 +487,15 @@ class TestRealPGPEndToEnd:
             service=challenge["service"],
             expires=challenge["expires"],
         )
-        client.post("/capauth/v1/verify", json={
-            "fingerprint": OPUS_FINGERPRINT,
-            "nonce": challenge["nonce"],
-            "nonce_signature": _sign_payload(nonce_payload),
-            "public_key": pub_armor,
-        })
+        client.post(
+            "/capauth/v1/verify",
+            json={
+                "fingerprint": OPUS_FINGERPRINT,
+                "nonce": challenge["nonce"],
+                "nonce_signature": _sign_payload(nonce_payload),
+                "public_key": pub_armor,
+            },
+        )
 
         # After enrollment
         status_after = client.get("/capauth/v1/status").json()

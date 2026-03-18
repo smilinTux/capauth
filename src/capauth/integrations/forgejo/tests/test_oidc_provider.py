@@ -116,7 +116,12 @@ class TestAuthorizeEndpoint:
     def test_unknown_client_returns_400(self, client: TestClient) -> None:
         resp = client.get(
             "/forgejo/authorize",
-            params={"response_type": "code", "client_id": "evil", "state": STATE, "redirect_uri": REDIRECT_URI},
+            params={
+                "response_type": "code",
+                "client_id": "evil",
+                "state": STATE,
+                "redirect_uri": REDIRECT_URI,
+            },
         )
         assert resp.status_code == 400
 
@@ -156,7 +161,9 @@ class TestAuthorizeComplete:
         assert "code=" in body["redirect_to"]
         assert f"state={STATE}" in body["redirect_to"]
 
-    def test_complete_missing_session_returns_400(self, client: TestClient, config: ForgejoConfig) -> None:
+    def test_complete_missing_session_returns_400(
+        self, client: TestClient, config: ForgejoConfig
+    ) -> None:
         token = _make_jwt(config)
         resp = client.post(
             "/forgejo/authorize/complete",
@@ -172,7 +179,9 @@ class TestAuthorizeComplete:
         )
         assert resp.status_code == 401
 
-    def test_complete_fingerprint_mismatch_returns_401(self, client: TestClient, config: ForgejoConfig) -> None:
+    def test_complete_fingerprint_mismatch_returns_401(
+        self, client: TestClient, config: ForgejoConfig
+    ) -> None:
         self._start_session(client)
         # JWT says CCCC... but we claim BBBB...
         token = _make_jwt(config, fingerprint="C" * 40)
@@ -207,11 +216,17 @@ class TestTokenEndpoint:
         token = _make_jwt(config)
         resp = client.post(
             "/forgejo/authorize/complete",
-            json={"state": STATE, "fingerprint": FINGERPRINT, "access_token": token, "oidc_claims": {}},
+            json={
+                "state": STATE,
+                "fingerprint": FINGERPRINT,
+                "access_token": token,
+                "oidc_claims": {},
+            },
         )
         redirect_to: str = resp.json()["redirect_to"]
         # Parse code from redirect_to URL
         from urllib.parse import parse_qs, urlparse
+
         qs = parse_qs(urlparse(redirect_to).query)
         return qs["code"][0]
 

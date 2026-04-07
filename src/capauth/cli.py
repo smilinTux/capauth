@@ -78,6 +78,12 @@ def main(ctx: click.Context, capauth_home: Optional[str]) -> None:
     default="pgpy",
     help="Crypto backend (default: pgpy).",
 )
+@click.option(
+    "--sync/--no-sync",
+    "enable_sync",
+    default=None,
+    help="Enable Syncthing sync for identity replication across nodes.",
+)
 @click.pass_context
 def init(
     ctx: click.Context,
@@ -87,11 +93,15 @@ def init(
     entity_type: str,
     algorithm: str,
     backend: str,
+    enable_sync: Optional[bool],
 ) -> None:
     """Create your sovereign profile.
 
     Generates a PGP keypair and initializes your CapAuth identity.
     Your keys and profile live on YOUR machine, under YOUR control.
+
+    With --sync, also configures Syncthing to replicate ~/.capauth/
+    across all nodes in your mesh so every host shares one identity.
     """
     from .profile import init_profile
 
@@ -122,8 +132,112 @@ def init(
                 border_style="green",
             )
         )
+
+        # Syncthing sync — offer to replicate identity across cluster
+        _offer_sync(profile, base, enable_sync)
+
     except CapAuthError as exc:
         console.print(f"[bold red]Error:[/] {exc}")
+        raise SystemExit(1)
+
+
+def _offer_sync(
+    profile: "SovereignProfile",
+    base_dir: Optional[Path],
+    enable_sync: Optional[bool],
+) -> None:
+    """Offer to set up Syncthing sync for the identity directory.
+
+    Args:
+        profile: The newly created profile.
+        base_dir: CapAuth home directory override.
+        enable_sync: True/False from --sync/--no-sync, or None to prompt.
+    """
+    from .sync import is_syncthing_available, is_sync_configured, setup_syncthing_sync
+
+    if not is_syncthing_available():
+        return
+
+    if is_sync_configured():
+        console.print(
+            "  [green]✓[/] Syncthing sync already configured for identity"
+        )
+        return
+
+    if enable_sync is None:
+        # Interactive — ask the user
+        console.print()
+        console.print(
+            "  [bold cyan]Cluster Sync[/] — Syncthing detected.\n"
+            "  Replicate this identity across all mesh nodes so every\n"
+            "  host shares one PGP keypair. Recommended for clusters.\n"
+        )
+        enable_sync = click.confirm(
+            "  Enable Syncthing sync for ~/.capauth/?",
+            default=True,
+        )
+
+    if not enable_sync:
+        console.print("  [dim]Skipped — identity stays local to this node[/]")
+        return
+
+    capauth_path = base_dir or Path(profile.storage.primary)
+    ok = setup_syncthing_sync(capauth_dir=capauth_path)
+    if ok:
+        console.print(
+            "  [green]✓[/] Syncthing sync enabled — identity will replicate to all mesh nodes"
+        )
+    else:
+        console.print(
+            "  [yellow]⚠[/] Could not configure Syncthing sync — set up manually"
+        )
+
+
+@main.command("sync")
+@click.option(
+    "--enable/--disable",
+    default=True,
+    help="Enable or check Syncthing identity sync.",
+)
+@click.pass_context
+def sync_cmd(ctx: click.Context, enable: bool) -> None:
+    """Configure Syncthing sync for identity replication.
+
+    Shares ~/.capauth/ across all Syncthing mesh nodes so every
+    host in the cluster uses the same PGP keypair.
+    """
+    from .sync import (
+        is_sync_configured,
+        is_syncthing_available,
+        setup_syncthing_sync,
+        get_known_devices,
+    )
+
+    if not is_syncthing_available():
+        console.print("[yellow]Syncthing not installed or not configured.[/]")
+        console.print("[dim]Install: sudo apt install syncthing[/]")
+        raise SystemExit(1)
+
+    if is_sync_configured():
+        console.print("[green]✓[/] Syncthing sync already configured for capauth-identity")
+        devices = get_known_devices()
+        console.print(f"  Sharing with {len(devices)} device(s)")
+        return
+
+    if not enable:
+        console.print("[dim]Sync not enabled.[/]")
+        return
+
+    base = ctx.obj.get("home")
+    capauth_path = Path(base) if base else None
+    ok = setup_syncthing_sync(capauth_dir=capauth_path)
+    if ok:
+        devices = get_known_devices()
+        console.print("[green]✓[/] Syncthing sync enabled for ~/.capauth/")
+        console.print(f"  Sharing with {len(devices)} device(s)")
+        console.print("  [dim]Restart Syncthing to apply: systemctl --user restart syncthing[/]")
+    else:
+        console.print("[red]✗[/] Failed to configure Syncthing sync")
         raise SystemExit(1)
 
 

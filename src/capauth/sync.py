@@ -25,7 +25,7 @@ from typing import Optional
 logger = logging.getLogger(__name__)
 
 FOLDER_ID = "capauth-identity"
-FOLDER_LABEL = "CapAuth Identity"
+FOLDER_LABEL = ".capauth"
 
 # Syncthing config locations (in priority order)
 _CONFIG_PATHS = [

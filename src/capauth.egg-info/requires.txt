@@ -17,6 +17,7 @@ fastapi>=0.110
 python-gnupg>=0.5
 black>=24.0
 ruff>=0.3
+zeroconf>=0.38
 
 [gnupg]
 python-gnupg>=0.5

@@ -14,6 +14,7 @@ src/capauth/models.py
 src/capauth/pma.py
 src/capauth/profile.py
 src/capauth/registry.py
+src/capauth/sync.py
 src/capauth.egg-info/PKG-INFO
 src/capauth.egg-info/SOURCES.txt
 src/capauth.egg-info/dependency_links.txt

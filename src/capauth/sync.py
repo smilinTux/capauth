@@ -22,6 +22,8 @@ import xml.etree.ElementTree as ET
 from pathlib import Path
 from typing import Optional
 
+from . import resolve_capauth_home
+
 logger = logging.getLogger(__name__)
 
 FOLDER_ID = "capauth-identity"
@@ -138,7 +140,7 @@ def setup_syncthing_sync(
     Returns:
         True if the folder was added successfully.
     """
-    capauth_path = capauth_dir or Path.home() / ".capauth"
+    capauth_path = resolve_capauth_home(capauth_dir)
 
     # Create .stfolder marker so Syncthing recognizes it
     (capauth_path / ".stfolder").touch(exist_ok=True)

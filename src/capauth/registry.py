@@ -19,7 +19,9 @@ from typing import Optional
 import yaml
 from pydantic import BaseModel, Field
 
-DEFAULT_CAPAUTH_DIR = Path.home() / ".capauth"
+from . import resolve_capauth_home
+
+DEFAULT_CAPAUTH_DIR = resolve_capauth_home()
 
 logger = logging.getLogger("capauth.registry")
 
@@ -143,7 +145,7 @@ def save_registry_entry(
     Returns:
         Path to the written YAML file.
     """
-    base = base_dir or DEFAULT_CAPAUTH_DIR
+    base = resolve_capauth_home(base_dir)
     registry_dir = base / REGISTRY_DIR
     registry_dir.mkdir(parents=True, exist_ok=True)
 
@@ -169,7 +171,7 @@ def load_registry_entries(
     Returns:
         List of RegistryEntry objects.
     """
-    base = base_dir or DEFAULT_CAPAUTH_DIR
+    base = resolve_capauth_home(base_dir)
     registry_dir = base / REGISTRY_DIR
 
     if not registry_dir.exists():

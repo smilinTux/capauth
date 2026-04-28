@@ -26,6 +26,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
+from . import resolve_capauth_home
 from .discovery.base import DiscoveryBackend, PeerInfo
 
 logger = logging.getLogger("capauth.mesh")
@@ -55,7 +56,7 @@ class PeerMesh:
         self.fingerprint = fingerprint
         self.name = name
         self.entity_type = entity_type
-        self._base = base_dir or Path.home() / ".capauth"
+        self._base = resolve_capauth_home(base_dir)
         self._backends: list[DiscoveryBackend] = []
         self._registry: dict[str, PeerInfo] = {}
         self._lock = threading.RLock()

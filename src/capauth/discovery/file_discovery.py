@@ -17,12 +17,13 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
+from .. import resolve_capauth_home
 from .base import DiscoveryBackend, PeerInfo
 
 logger = logging.getLogger("capauth.discovery.file")
 
 PRESENCE_SUFFIX = ".capauth.json"
-DEFAULT_DIR = Path.home() / ".capauth" / "mesh" / "peers"
+DEFAULT_DIR = resolve_capauth_home() / "mesh" / "peers"
 STALE_SECONDS = 300
 
 

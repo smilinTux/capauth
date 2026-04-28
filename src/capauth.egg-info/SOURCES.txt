@@ -60,6 +60,7 @@ tests/__init__.py
 tests/conftest.py
 tests/test_claims_mapper.py
 tests/test_crypto.py
+tests/test_home_resolution.py
 tests/test_identity.py
 tests/test_login.py
 tests/test_mesh.py

@@ -16,7 +16,9 @@ from typing import Optional
 
 from pydantic import BaseModel, Field
 
-DEFAULT_DB_PATH = Path("~/.capauth/service/keys.db").expanduser()
+from .. import resolve_capauth_home
+
+DEFAULT_DB_PATH = resolve_capauth_home() / "service" / "keys.db"
 
 
 class EnrolledKey(BaseModel):

@@ -9,6 +9,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Optional
 
+from . import resolve_capauth_home
 from .crypto import CryptoBackend, get_backend
 from .exceptions import ProfileError, ProfileExistsError, StorageError
 from .models import (
@@ -21,7 +22,7 @@ from .models import (
     StorageConfig,
 )
 
-DEFAULT_CAPAUTH_DIR = Path.home() / ".capauth"
+DEFAULT_CAPAUTH_DIR = resolve_capauth_home()
 
 IDENTITY_DIR = "identity"
 DATA_DIR = "data"
@@ -82,7 +83,7 @@ def init_profile(
         KeyGenerationError: If keypair generation fails.
         StorageError: If writing to disk fails.
     """
-    base = base_dir or DEFAULT_CAPAUTH_DIR
+    base = resolve_capauth_home(base_dir)
     identity_dir = base / IDENTITY_DIR
 
     if (identity_dir / PROFILE_FILENAME).exists():
@@ -189,7 +190,7 @@ def load_profile(base_dir: Optional[Path] = None) -> SovereignProfile:
     Raises:
         ProfileError: If no profile exists or JSON is invalid.
     """
-    base = base_dir or DEFAULT_CAPAUTH_DIR
+    base = resolve_capauth_home(base_dir)
     profile_path = base / IDENTITY_DIR / PROFILE_FILENAME
 
     if not profile_path.exists():
@@ -214,7 +215,7 @@ def export_public_key(base_dir: Optional[Path] = None) -> str:
     Raises:
         ProfileError: If the key file is missing.
     """
-    base = base_dir or DEFAULT_CAPAUTH_DIR
+    base = resolve_capauth_home(base_dir)
     pub_path = base / IDENTITY_DIR / PUBLIC_KEY_FILENAME
 
     if not pub_path.exists():
@@ -239,7 +240,7 @@ def verify_profile_signature(
     if not profile.signature:
         return False
 
-    base = base_dir or DEFAULT_CAPAUTH_DIR
+    base = resolve_capauth_home(base_dir)
     pub_armor = export_public_key(base)
     backend = get_backend(profile.crypto_backend)
 

@@ -8,7 +8,9 @@
     "build:firefox": "node scripts/build.js --firefox",
     "build:icons": "node scripts/generate-icons.js",
     "watch": "node scripts/build.js --watch",
-    "clean": "rm -rf dist"
+    "clean": "rm -rf dist",
+    "package": "npm run build && cd dist/chrome && zip -r ../../capauth-extension.zip .",
+    "package:firefox": "npm run build:firefox && cd dist/firefox && zip -r ../../capauth-extension-firefox.xpi ."
   },
   "dependencies": {
     "openpgp": "^5.11.0"

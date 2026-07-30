@@ -34,7 +34,20 @@ from typing import Optional
 
 from pydantic import BaseModel, Field
 
+from .agent_identity import resolve_agent_identity
+
 logger = logging.getLogger("capauth.tokens")
+
+#: Standard default scopes per audience for the ergonomic mint wrapper.
+#:
+#: These are the audience-scoped grants a subapp's dataplane accepts (distinct
+#: from the PDP capabilities in :data:`capauth.provisioning.SKCHAT_SCOPES`). The
+#: ``skchat`` entry mirrors what skchat's dataplane honours: read + send chat,
+#: join calls, join spaces. Callers may always override with an explicit
+#: ``scopes`` list.
+AUDIENCE_SCOPES: dict[str, list[str]] = {
+    "skchat": ["chat.read", "chat.send", "calls.join", "spaces.join"],
+}
 
 
 class TokenType(str, Enum):
@@ -297,6 +310,78 @@ def mint_audience_token(
         ",".join(scopes),
     )
     return token
+
+
+def mint_agent_audience_token(
+    agent: Optional[str] = None,
+    audience: str = "skchat",
+    scopes: Optional[list[str]] = None,
+    *,
+    ttl_hours: int = 1,
+    home: Optional[Path] = None,
+    sign: bool = True,
+    metadata: Optional[dict] = None,
+) -> SignedToken:
+    """Mint an audience-scoped token for an agent using its resolved identity.
+
+    Operator-ergonomic wrapper over :func:`mint_audience_token`. Instead of
+    hand-supplying a subject, a signing home, and the audience's standard scopes,
+    this resolves them for you:
+
+    * **subject** comes from :func:`capauth.resolve_agent_identity`. The
+      resolved ``fqid`` (``<agent>@<operator>.<realm>``) is used because that is
+      the subject the PDP / skchat dataplane sees; it falls back to the
+      ``capauth_uri`` wire identity when no ``cluster.json`` yields an fqid.
+    * **home** defaults to :func:`capauth.resolve_capauth_home` when not given.
+    * **scopes** default to :data:`AUDIENCE_SCOPES` for the audience (for
+      ``skchat``: ``chat.read``/``chat.send``/``calls.join``/``spaces.join``).
+      An explicit ``scopes`` list always overrides the default.
+
+    Args:
+        agent: Short agent name; ``None`` resolves the active agent (SKAGENT).
+        audience: The subapp id the token is scoped to (default ``"skchat"``).
+        scopes: Explicit granted scopes; ``None`` uses the audience default.
+        ttl_hours: Hours until expiry (default 1; the shell re-mints).
+        home: CapAuth home; ``None`` resolves via ``resolve_capauth_home()``.
+        sign: Whether to PGP-sign the token.
+        metadata: Additional claims to embed.
+
+    Returns:
+        A :class:`SignedToken` scoped to ``audience`` with the resolved subject.
+
+    Raises:
+        ValueError: If ``scopes`` is None and ``audience`` has no default entry.
+    """
+    if scopes is not None:
+        granted = list(scopes)
+    else:
+        default = AUDIENCE_SCOPES.get(audience)
+        if default is None:
+            raise ValueError(
+                f"no default scopes for audience {audience!r}; "
+                "pass an explicit scopes list"
+            )
+        granted = list(default)
+
+    ident = resolve_agent_identity(agent)
+    subject = ident.fqid or ident.capauth_uri
+
+    if home is not None:
+        resolved_home = Path(home).expanduser()
+    else:
+        from . import resolve_capauth_home
+
+        resolved_home = resolve_capauth_home()
+
+    return mint_audience_token(
+        resolved_home,
+        subject,
+        audience,
+        granted,
+        ttl_hours=ttl_hours,
+        metadata=metadata,
+        sign=sign,
+    )
 
 
 def verify_audience_token(
@@ -612,7 +697,9 @@ __all__ = [
     "SignedToken",
     "issue_token",
     "verify_token",
+    "AUDIENCE_SCOPES",
     "mint_audience_token",
+    "mint_agent_audience_token",
     "verify_audience_token",
     "has_scope",
     "revoke_token",

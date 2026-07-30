@@ -34,6 +34,7 @@ from .pairing import (
 )
 from .provisioning import SKCHAT_SCOPES, provision_subject
 from .tokens import (
+    AUDIENCE_SCOPES,
     Capability,
     SignedToken,
     TokenPayload,
@@ -44,6 +45,7 @@ from .tokens import (
     is_revoked,
     issue_token,
     list_tokens,
+    mint_agent_audience_token,
     mint_audience_token,
     revoke_token,
     verify_audience_token,
@@ -104,7 +106,9 @@ __all__ = [
     "revoke_token",
     "verify_token",
     # audience-scoped token minting (audience-mint, M1+/R4.2)
+    "AUDIENCE_SCOPES",
     "mint_audience_token",
+    "mint_agent_audience_token",
     "verify_audience_token",
     "has_scope",
     # trust (kernel track M1: moved verbatim from skcapstone)
@@ -125,7 +129,7 @@ __all__ = [
     "save_calibration",
 ]
 
-__version__ = "0.2.12"
+__version__ = "0.2.13"
 
 SKCAPSTONE_HOME = Path.home() / ".skcapstone"
 DEFAULT_CAPAUTH_DIR = SKCAPSTONE_HOME / "capauth"

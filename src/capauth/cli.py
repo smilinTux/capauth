@@ -1336,6 +1336,98 @@ def _render_profile(p: "SovereignProfile") -> None:
     console.print(table)
 
 
+@main.group()
+def token() -> None:
+    """Issue and inspect capability tokens."""
+
+
+@token.command("mint-audience")
+@click.option(
+    "--agent",
+    default=None,
+    help="Agent whose resolved identity is the token subject (default: active agent).",
+)
+@click.option(
+    "--audience",
+    default="skchat",
+    help="Audience (subapp id) the token is scoped to (default: skchat).",
+)
+@click.option(
+    "--scope",
+    "scopes",
+    multiple=True,
+    help="Grant this scope (repeatable). Overrides the audience default scopes.",
+)
+@click.option(
+    "--ttl-hours",
+    default=1,
+    type=int,
+    help="Token lifetime in hours (default: 1).",
+)
+@click.option(
+    "--no-sign",
+    is_flag=True,
+    default=False,
+    help="Do not PGP-sign the token (default: sign when a key is available).",
+)
+@click.option(
+    "--export",
+    "export",
+    is_flag=True,
+    default=False,
+    help="Also print the base64url wire form skchat's dataplane accepts.",
+)
+@click.pass_context
+def token_mint_audience(
+    ctx: click.Context,
+    agent: Optional[str],
+    audience: str,
+    scopes: tuple[str, ...],
+    ttl_hours: int,
+    no_sign: bool,
+    export: bool,
+) -> None:
+    """Mint an audience-scoped token for an agent's resolved identity.
+
+    Resolves the subject from the agent's identity (its fqid, matching what the
+    PDP / skchat sees), defaults scopes to the audience's standard set, and mints
+    a short-lived audience token. With --export, also prints the base64url wire
+    form an operator can hand to a subapp dataplane as a credential.
+    """
+    import base64
+
+    from .tokens import export_token, mint_agent_audience_token
+
+    scope_list = list(scopes) if scopes else None
+
+    try:
+        tok = mint_agent_audience_token(
+            agent=agent,
+            audience=audience,
+            scopes=scope_list,
+            ttl_hours=ttl_hours,
+            home=ctx.obj.get("home"),
+            sign=not no_sign,
+        )
+    except (CapAuthError, ValueError) as exc:
+        console.print(f"[bold red]Error:[/] {exc}")
+        raise SystemExit(1)
+
+    console.print(f"[bold green]Minted[/] audience token [cyan]{tok.payload.token_id}[/]")
+    console.print(f"  subject:  {tok.payload.subject}")
+    console.print(f"  audience: {tok.payload.audience}")
+    console.print(f"  scopes:   {', '.join(tok.payload.capabilities)}")
+    if tok.payload.expires_at:
+        console.print(f"  expires:  {tok.payload.expires_at.isoformat()}")
+    if not tok.signature:
+        console.print("[yellow]  (unsigned — no gpg key available)[/]")
+
+    if export:
+        wire = base64.urlsafe_b64encode(export_token(tok).encode("utf-8")).decode("ascii")
+        console.print("[dim]wire (base64url):[/]")
+        click.echo(wire)
+
+
 @main.command("pqc-report")
 @click.option("--format", "output_format", default="text",
               type=click.Choice(["text", "json"]))

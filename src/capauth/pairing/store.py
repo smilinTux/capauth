@@ -160,6 +160,11 @@ class PairingStore:
         """
         return {
             "device_id": device.device_id,
+            # The device's OWN subject, so it stays findable by list_devices(subject)
+            # even when it lands in a pre-existing peer file whose identity differs
+            # (e.g. an agent enrolled under a distinct fqid). Legacy entries without
+            # this key fall back to the peer record's identity on read.
+            "subject": device.subject,
             "enrollment_id": device.enrollment_id,
             "pubkey": device.pubkey,
             "fingerprint": device.fingerprint,
@@ -244,7 +249,9 @@ class PairingStore:
         try:
             return DeviceRecord(
                 device_id=entry["device_id"],
-                subject=subject,
+                # Prefer the device's own stored subject; fall back to the peer
+                # record's identity for legacy entries written before this field.
+                subject=entry.get("subject") or subject,
                 pubkey=entry.get("pubkey", ""),
                 fingerprint=entry.get("fingerprint", ""),
                 mode=EnrollmentMode(entry["mode"]),

@@ -422,3 +422,29 @@ def test_unique_device_ids_across_enrollments(tmp_path):
         itertools.chain.from_iterable([[d.device_id] for d in list_devices(base_dir=tmp_path)])
     )
     assert set(listed) == ids
+
+
+def test_device_findable_when_peer_file_identity_differs(tmp_path):
+    # Regression: a device enrolled under subject X landing in a pre-existing peer
+    # file whose identity is Y must still be found by list_devices(X).
+    import json
+
+    from capauth.pairing import approve, enroll_device, list_devices
+
+    base = tmp_path / "home"
+    peers = base / "peers"
+    peers.mkdir(parents=True)
+    # A pre-existing v1 peer record keyed by the same slug but a DIFFERENT identity.
+    (peers / "lumina.json").write_text(
+        json.dumps({"name": "Lumina", "identity": "lumina@chef.skworld", "fingerprint": "AA"})
+    )
+    enr = enroll_device(
+        "lumina@chef.skworld.io", ["skchat.send"], mode="verified",
+        subject="lumina@chef.skworld.io", base_dir=base,
+    )
+    approve(enr.enrollment_id, "operator", base_dir=base)
+    found = list_devices("lumina@chef.skworld.io", base_dir=base)
+    assert len(found) == 1
+    assert found[0].subject == "lumina@chef.skworld.io"
+    # The pre-existing v1 identity field is left untouched.
+    assert json.loads((peers / "lumina.json").read_text())["identity"] == "lumina@chef.skworld"

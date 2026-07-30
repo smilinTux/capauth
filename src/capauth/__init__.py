@@ -32,6 +32,7 @@ from .pairing import (
     open_window,
     revoke,
 )
+from .provisioning import SKCHAT_SCOPES, provision_subject
 from .tokens import (
     Capability,
     SignedToken,
@@ -124,7 +125,7 @@ __all__ = [
     "save_calibration",
 ]
 
-__version__ = "0.2.8"
+__version__ = "0.2.9"
 
 SKCAPSTONE_HOME = Path.home() / ".skcapstone"
 DEFAULT_CAPAUTH_DIR = SKCAPSTONE_HOME / "capauth"

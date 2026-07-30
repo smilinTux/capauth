@@ -10,6 +10,14 @@ import os
 from pathlib import Path
 
 from .agent_identity import AgentIdentity, resolve_agent_identity
+from .authz import (
+    DEFAULT_RULES,
+    OBLIGATION_AUDIT,
+    CapabilityRule,
+    Decision,
+    Obligation,
+    decide,
+)
 from .pairing import (
     DeviceRecord,
     Enrollment,
@@ -59,6 +67,13 @@ __all__ = [
     "AgentIdentity",
     "resolve_agent_identity",
     "resolve_capauth_home",
+    # authz kernel (spine M3: deterministic decide() PDP)
+    "decide",
+    "Decision",
+    "Obligation",
+    "CapabilityRule",
+    "DEFAULT_RULES",
+    "OBLIGATION_AUDIT",
     # pairing kernel (spine M2: enrollment modes + operator window)
     "enroll_device",
     "approve",
@@ -102,7 +117,7 @@ __all__ = [
     "save_calibration",
 ]
 
-__version__ = "0.2.6"
+__version__ = "0.2.7"
 
 SKCAPSTONE_HOME = Path.home() / ".skcapstone"
 DEFAULT_CAPAUTH_DIR = SKCAPSTONE_HOME / "capauth"

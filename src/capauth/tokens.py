@@ -45,8 +45,30 @@ logger = logging.getLogger("capauth.tokens")
 #: ``skchat`` entry mirrors what skchat's dataplane honours: read + send chat,
 #: join calls, join spaces. Callers may always override with an explicit
 #: ``scopes`` list.
+#:
+#: Grounding for each entry (source of truth is the subapp's manifest / adapter):
+#:
+#: * ``skchat`` - what skchat's dataplane honours (read + send chat, join calls,
+#:   join spaces). Left exactly as originally defined.
+#: * ``skcode`` - the ``auth.scopes`` block of skcode's SKWorld module manifest
+#:   (``skharness.manifest.skcode_module_manifest`` -> ``["skcode.stream",
+#:   "skcode.inject", "skcode.dispatch"]``). This is the grounded source of truth.
+#: * ``skcomms`` / ``skos`` / ``skmemory`` - PROVISIONAL. These subapps do not yet
+#:   publish an SKWorld module manifest with an ``auth.scopes`` block, and their
+#:   operator adapters expose only the control-plane facet (conditions + actions),
+#:   not dataplane audience scopes. Each gets a minimal read-only default
+#:   (``<app>.read``) so the ergonomic mint helper succeeds for their audiences
+#:   without an explicit scopes arg. Tighten/expand these to a real
+#:   ``<app>.<verb>`` set once each subapp declares its manifest auth block;
+#:   callers needing more can always pass an explicit ``scopes`` list.
 AUDIENCE_SCOPES: dict[str, list[str]] = {
     "skchat": ["chat.read", "chat.send", "calls.join", "spaces.join"],
+    # Grounded: skcode manifest auth.scopes (skharness.manifest).
+    "skcode": ["skcode.stream", "skcode.inject", "skcode.dispatch"],
+    # Provisional: minimal read scope until a manifest auth block exists.
+    "skcomms": ["skcomms.read"],
+    "skos": ["skos.read"],
+    "skmemory": ["skmemory.read"],
 }
 
 

@@ -111,6 +111,49 @@ class TestMintAgentAudienceToken:
         assert tok.payload.audience == "skcode"
         assert tok.payload.capabilities == ["skcode.stream"]
 
+    def test_skcode_default_scopes(self, agent_home, stub_identity):
+        """skcode resolves its manifest-grounded default scopes with no scopes arg."""
+        tok = mint_agent_audience_token(
+            agent="testagent", audience="skcode", home=agent_home, sign=False
+        )
+        assert tok.payload.audience == "skcode"
+        assert tok.payload.capabilities == AUDIENCE_SCOPES["skcode"]
+        assert tok.payload.capabilities == [
+            "skcode.stream",
+            "skcode.inject",
+            "skcode.dispatch",
+        ]
+
+    @pytest.mark.parametrize(
+        "audience,expected",
+        [
+            ("skcomms", ["skcomms.read"]),
+            ("skos", ["skos.read"]),
+            ("skmemory", ["skmemory.read"]),
+        ],
+    )
+    def test_provisional_audiences_default_scopes(
+        self, agent_home, stub_identity, audience, expected
+    ):
+        """skcomms/skos/skmemory each mint with their provisional read scope."""
+        tok = mint_agent_audience_token(
+            agent="testagent", audience=audience, home=agent_home, sign=False
+        )
+        assert tok.payload.audience == audience
+        assert tok.payload.capabilities == expected
+        assert tok.payload.capabilities == AUDIENCE_SCOPES[audience]
+
+    def test_explicit_scopes_override_new_audience(self, agent_home, stub_identity):
+        """An explicit scopes arg still overrides the default for a new audience."""
+        tok = mint_agent_audience_token(
+            agent="testagent",
+            audience="skmemory",
+            scopes=["skmemory.read", "skmemory.write"],
+            home=agent_home,
+            sign=False,
+        )
+        assert tok.payload.capabilities == ["skmemory.read", "skmemory.write"]
+
     def test_unknown_audience_without_scopes_raises(self, agent_home, stub_identity):
         with pytest.raises(ValueError):
             mint_agent_audience_token(

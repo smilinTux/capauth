@@ -44,3 +44,40 @@ def rsa_keybundle(pgpy_backend) -> "KeyBundle":
 def tmp_capauth_home(tmp_path) -> Path:
     """Provide a temporary directory for profile tests."""
     return tmp_path / ".capauth"
+
+
+# --- Trust domain fixtures (kernel track M1) -------------------------------
+# The moved trust-web tests build a full skcapstone agent home. These fixtures
+# are ported from skcapstone's conftest so the copied tests run byte-identically.
+
+
+@pytest.fixture
+def tmp_agent_home(tmp_path: Path) -> Path:
+    """Provide a temporary agent home directory (~/.skcapstone) for testing."""
+    agent_home = tmp_path / ".skcapstone"
+    agent_home.mkdir()
+    return agent_home
+
+
+@pytest.fixture(autouse=True)
+def _isolate_skcapstone_agent_env(monkeypatch):
+    """Keep host SKCAPSTONE_AGENT / SKMEMORY_AGENT out of the trust tests.
+
+    skcapstone's profile-aware runtime routes memory/trust writes to the active
+    agent (from the env vars and a live ~/.skcapstone/agents/ scan). On a dev box
+    that would send the moved trust tests' writes into a real agent's home. Clear
+    both vars and stub the active-agent detector so the pillars use the flat
+    ``home/`` layout the tests pass explicitly. No-op when skcapstone is absent
+    (capauth standalone CI), so capauth's own tests are unaffected.
+    """
+    try:
+        import skcapstone
+    except ImportError:
+        return
+
+    monkeypatch.delenv("SKCAPSTONE_AGENT", raising=False)
+    monkeypatch.delenv("SKMEMORY_AGENT", raising=False)
+    monkeypatch.setenv("SKAGENT", "")
+    monkeypatch.setattr(skcapstone, "SKCAPSTONE_AGENT", "", raising=False)
+    if hasattr(skcapstone, "_detect_active_agent"):
+        monkeypatch.setattr(skcapstone, "_detect_active_agent", lambda root=None: None)

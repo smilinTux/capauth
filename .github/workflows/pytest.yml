@@ -77,4 +77,4 @@ jobs:
           python -m pip install --upgrade pip
           pip install -e ".[dev,service,skcapstone]"
       - name: Run skcapstone-integration tests
-        run: python -m pytest tests/test_integration.py
+        run: python -m pytest tests/test_integration.py tests/test_trust_graph.py tests/test_trust_calibration.py

@@ -23,6 +23,23 @@ from .tokens import (
     revoke_token,
     verify_token,
 )
+from .trust import (
+    CALIBRATION_FILENAME,
+    DEFAULT_THRESHOLDS,
+    FORMATTERS,
+    TrustEdge,
+    TrustGraph,
+    TrustNode,
+    TrustThresholds,
+    apply_setting,
+    build_trust_graph,
+    format_dot,
+    format_json,
+    format_table,
+    load_calibration,
+    recommend_thresholds,
+    save_calibration,
+)
 
 __all__ = [
     "AgentIdentity",
@@ -40,9 +57,25 @@ __all__ = [
     "list_tokens",
     "revoke_token",
     "verify_token",
+    # trust (kernel track M1: moved verbatim from skcapstone)
+    "FORMATTERS",
+    "CALIBRATION_FILENAME",
+    "DEFAULT_THRESHOLDS",
+    "TrustEdge",
+    "TrustGraph",
+    "TrustNode",
+    "TrustThresholds",
+    "apply_setting",
+    "build_trust_graph",
+    "format_dot",
+    "format_json",
+    "format_table",
+    "load_calibration",
+    "recommend_thresholds",
+    "save_calibration",
 ]
 
-__version__ = "0.2.4"
+__version__ = "0.2.5"
 
 SKCAPSTONE_HOME = Path.home() / ".skcapstone"
 DEFAULT_CAPAUTH_DIR = SKCAPSTONE_HOME / "capauth"

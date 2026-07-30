@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import json
 import logging
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -97,22 +98,34 @@ def save_calibration(home: Path, thresholds: TrustThresholds) -> Path:
     return cal_file
 
 
-def recommend_thresholds(home: Path) -> dict[str, Any]:
+def recommend_thresholds(
+    home: Path,
+    *,
+    feb_provider: Callable[[Path], list] | None = None,
+) -> dict[str, Any]:
     """Analyze existing FEB data and recommend threshold adjustments.
 
-    Reads all FEB files, computes statistics, and suggests
-    calibration values tuned to the agent's actual emotional history.
+    Computes statistics over FEB summaries and suggests calibration
+    values tuned to the agent's actual emotional history.
+
+    FEB data is advisory and lives in a higher layer (skcapstone). This
+    L0 identity core must never reach up into it, so the FEB summaries are
+    supplied by the caller through ``feb_provider`` (dependency inversion).
+    A skcapstone caller passes ``skcapstone.pillars.trust.list_febs``. When
+    no provider is given, capauth degrades gracefully to an empty FEB list
+    (the same output it would produce with zero FEBs), and never imports
+    skcapstone.
 
     Args:
         home: Agent home directory.
+        feb_provider: Callable that returns a list of FEB summary dicts for
+            the given home (e.g. ``list_febs``). Defaults to no FEBs.
 
     Returns:
         Dict with current values, recommendations, and reasoning.
     """
-    from skcapstone.pillars.trust import list_febs
-
     current = load_calibration(home)
-    febs = list_febs(home)
+    febs = feb_provider(home) if feb_provider is not None else []
 
     if not febs:
         return {

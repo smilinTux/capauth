@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import importlib.util
+import inspect
 import json
 from pathlib import Path
 
 import pytest
 
+import capauth.trust.calibration as calibration_module
 from capauth.trust.calibration import (
     TrustThresholds,
     apply_setting,
@@ -16,11 +18,12 @@ from capauth.trust.calibration import (
     save_calibration,
 )
 
-# recommend_thresholds() and _derive_trust_from_febs() read FEB summaries via
-# skcapstone.pillars.trust.list_febs (a lazy import kept byte-identical in the
-# move). Gate those classes when the sibling skcapstone package is absent
-# (capauth standalone CI). The TrustThresholds / load / save / apply_setting
-# surface is pure capauth and always runs.
+# recommend_thresholds() no longer imports skcapstone: FEB summaries are supplied
+# by the caller via the feb_provider parameter (dependency inversion). The pure
+# capauth surface (TrustThresholds / load / save / apply_setting / recommend with
+# no or a fake provider) always runs. Only the tests that exercise the REAL
+# skcapstone FEB reader (_derive_trust_from_febs, list_febs as the provider) are
+# gated on the sibling skcapstone package being installed (capauth standalone CI).
 _requires_skcapstone = pytest.mark.skipif(
     importlib.util.find_spec("skcapstone") is None,
     reason="needs the sibling skcapstone package (pillars.trust.list_febs)",
@@ -110,18 +113,96 @@ class TestApplySetting:
             apply_setting(tmp_agent_home, "nonexistent_key", "42")
 
 
-@_requires_skcapstone
+class TestNoSkcapstoneDependency:
+    """The whole point of the inversion: capauth.trust never reaches up.
+
+    These are the hard gate for the meta-loop pilot card.
+    """
+
+    def test_module_source_has_no_skcapstone_import(self):
+        """capauth.trust.calibration must not import skcapstone anywhere.
+
+        Walks the AST (not raw text, so the explanatory docstring may name
+        skcapstone) and asserts no import statement, at module OR function
+        scope, references skcapstone.
+        """
+        import ast
+
+        tree = ast.parse(inspect.getsource(calibration_module))
+        offenders: list[str] = []
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                offenders += [n.name for n in node.names if n.name.split(".")[0] == "skcapstone"]
+            elif isinstance(node, ast.ImportFrom):
+                if (node.module or "").split(".")[0] == "skcapstone":
+                    offenders.append(node.module)
+        assert not offenders, (
+            f"capauth.trust.calibration imports skcapstone {offenders} "
+            "(inverted dependency). FEB data must come in via feb_provider."
+        )
+
+    def test_import_does_not_pull_in_skcapstone(self):
+        """Importing capauth.trust in a clean interpreter never loads skcapstone."""
+        import subprocess
+        import sys
+
+        code = (
+            "import sys; import capauth.trust.calibration as m; "
+            "m.recommend_thresholds(__import__('pathlib').Path('/nonexistent-home')); "
+            "assert 'skcapstone' not in sys.modules, sorted(k for k in sys.modules if 'skcapstone' in k)"
+        )
+        result = subprocess.run(
+            [sys.executable, "-c", code],
+            capture_output=True,
+            text=True,
+        )
+        assert result.returncode == 0, result.stderr
+
+    def test_feb_provider_none_degrades_gracefully(self, tmp_agent_home: Path):
+        """With no provider, capauth alone recommends the zero-FEB result."""
+        rec = recommend_thresholds(tmp_agent_home, feb_provider=None)
+        assert rec["feb_count"] == 0
+        assert rec["changes"] == []
+        assert rec["recommended"] == rec["current"]
+
+
 class TestRecommendThresholds:
-    """Tests for recommend_thresholds()."""
+    """Tests for recommend_thresholds() (pure capauth surface)."""
 
     def test_no_febs_returns_defaults(self, tmp_agent_home: Path):
-        """Without FEB files, recommends current (default) values."""
+        """Without a provider, recommends current (default) values."""
         rec = recommend_thresholds(tmp_agent_home)
         assert rec["feb_count"] == 0
         assert rec["changes"] == []
 
-    def test_with_febs(self, tmp_agent_home: Path):
-        """With FEB data, provides analysis and may suggest changes."""
+    def test_with_fake_provider(self, tmp_agent_home: Path):
+        """A provider supplies FEB summaries; capauth analyzes them.
+
+        Proves the inversion works with any provider, no skcapstone needed.
+        The provider returns list_febs-shaped summary dicts.
+        """
+        summaries = [
+            {"intensity": 9, "oof_triggered": True},
+            {"intensity": 9, "oof_triggered": True},
+        ]
+        rec = recommend_thresholds(tmp_agent_home, feb_provider=lambda _home: summaries)
+        assert rec["feb_count"] == 2
+        assert rec["feb_stats"]["max_intensity"] == 9
+        assert rec["feb_stats"]["oof_triggers"] == 2
+
+    def test_returns_structured_data(self, tmp_agent_home: Path):
+        """Recommendation has the expected structure."""
+        rec = recommend_thresholds(tmp_agent_home)
+        assert "current" in rec
+        assert "recommended" in rec
+        assert "changes" in rec
+        assert "reasoning" in rec
+
+    @_requires_skcapstone
+    def test_with_real_list_febs_provider(self, tmp_agent_home: Path):
+        """The real skcapstone list_febs provider still drives recommendation."""
+        from skcapstone.pillars.trust import list_febs
+
         febs_dir = tmp_agent_home / "trust" / "febs"
         febs_dir.mkdir(parents=True, exist_ok=True)
 
@@ -143,17 +224,9 @@ class TestRecommendThresholds:
         (febs_dir / "FEB_test1.feb").write_text(json.dumps(feb))
         (febs_dir / "FEB_test2.feb").write_text(json.dumps(feb))
 
-        rec = recommend_thresholds(tmp_agent_home)
+        rec = recommend_thresholds(tmp_agent_home, feb_provider=list_febs)
         assert rec["feb_count"] == 2
         assert rec["feb_stats"]["max_intensity"] == 9
-
-    def test_returns_structured_data(self, tmp_agent_home: Path):
-        """Recommendation has the expected structure."""
-        rec = recommend_thresholds(tmp_agent_home)
-        assert "current" in rec
-        assert "recommended" in rec
-        assert "changes" in rec
-        assert "reasoning" in rec
 
 
 @_requires_skcapstone

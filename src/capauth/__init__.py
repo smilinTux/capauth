@@ -10,14 +10,39 @@ import os
 from pathlib import Path
 
 from .agent_identity import AgentIdentity, resolve_agent_identity
+from .tokens import (
+    Capability,
+    SignedToken,
+    TokenPayload,
+    TokenType,
+    export_token,
+    import_token,
+    is_revoked,
+    issue_token,
+    list_tokens,
+    revoke_token,
+    verify_token,
+)
 
 __all__ = [
     "AgentIdentity",
     "resolve_agent_identity",
     "resolve_capauth_home",
+    # tokens (kernel track M1: moved verbatim from skcapstone)
+    "Capability",
+    "SignedToken",
+    "TokenPayload",
+    "TokenType",
+    "export_token",
+    "import_token",
+    "is_revoked",
+    "issue_token",
+    "list_tokens",
+    "revoke_token",
+    "verify_token",
 ]
 
-__version__ = "0.1.7"
+__version__ = "0.2.4"
 
 SKCAPSTONE_HOME = Path.home() / ".skcapstone"
 DEFAULT_CAPAUTH_DIR = SKCAPSTONE_HOME / "capauth"

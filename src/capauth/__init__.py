@@ -38,11 +38,14 @@ from .tokens import (
     TokenPayload,
     TokenType,
     export_token,
+    has_scope,
     import_token,
     is_revoked,
     issue_token,
     list_tokens,
+    mint_audience_token,
     revoke_token,
+    verify_audience_token,
     verify_token,
 )
 from .trust import (
@@ -99,6 +102,10 @@ __all__ = [
     "list_tokens",
     "revoke_token",
     "verify_token",
+    # audience-scoped token minting (audience-mint, M1+/R4.2)
+    "mint_audience_token",
+    "verify_audience_token",
+    "has_scope",
     # trust (kernel track M1: moved verbatim from skcapstone)
     "FORMATTERS",
     "CALIBRATION_FILENAME",
@@ -117,7 +124,7 @@ __all__ = [
     "save_calibration",
 ]
 
-__version__ = "0.2.7"
+__version__ = "0.2.8"
 
 SKCAPSTONE_HOME = Path.home() / ".skcapstone"
 DEFAULT_CAPAUTH_DIR = SKCAPSTONE_HOME / "capauth"

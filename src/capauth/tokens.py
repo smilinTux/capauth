@@ -87,6 +87,14 @@ class TokenPayload(BaseModel):
     metadata: dict = Field(
         default_factory=dict, description="Additional claims (agent name, platform, etc.)"
     )
+    audience: Optional[str] = Field(
+        default=None,
+        description=(
+            "The audience (subapp id) this token is scoped to. None means an "
+            "unscoped legacy token. Additive and backward-compatible: tokens "
+            "issued before this field existed load with audience=None."
+        ),
+    )
 
     @property
     def is_expired(self) -> bool:
@@ -115,6 +123,21 @@ class TokenPayload(BaseModel):
             True if the capability is granted (or ALL is granted).
         """
         return Capability.ALL.value in self.capabilities or cap in self.capabilities
+
+    def has_scope(self, scope: str) -> bool:
+        """Check if this token grants a specific scope.
+
+        Audience-scoped tokens carry their granted scopes in ``capabilities``
+        (e.g. ``chat.read``, ``skcode.stream``). This mirrors
+        :meth:`has_capability` and honours the ``*`` wildcard.
+
+        Args:
+            scope: The scope string to check (e.g. 'chat.send').
+
+        Returns:
+            True if the scope is granted (or ALL is granted).
+        """
+        return self.has_capability(scope)
 
 
 class SignedToken(BaseModel):
@@ -202,6 +225,129 @@ def verify_token(token: SignedToken, home: Optional[Path] = None) -> bool:
 
     logger.warning("Token %s has no signature", token.payload.token_id[:12])
     return False
+
+
+def mint_audience_token(
+    home: Path,
+    subject: str,
+    audience: str,
+    scopes: list[str],
+    *,
+    ttl_hours: int = 1,
+    metadata: Optional[dict] = None,
+    sign: bool = True,
+) -> SignedToken:
+    """Mint a short-lived, audience-scoped capability token.
+
+    This is the M1+ / R4.2 audience-mint surface. The SKWorld shell mints one
+    of these per mounted subapp so a pane only ever holds a token for its own
+    audience and scopes (containment). The token's ``audience`` is set to the
+    subapp id from the manifest (``auth.audience``, e.g. ``"skchat"``) and its
+    ``capabilities`` are the granted ``scopes`` (a subset of the manifest's
+    declared ``auth.scopes``). Tokens are short-lived by default (1 hour) since
+    the shell re-mints; a compromised pane is contained.
+
+    The signing and storage path is delegated to :func:`issue_token`, so there
+    is a single crypto path (no duplicated signing logic).
+
+    Args:
+        home: Agent home directory (~/.skcapstone).
+        subject: The human/session identity the token is minted for.
+        audience: The subapp id the token is scoped to (e.g. "skchat").
+        scopes: The granted scope strings (become ``capabilities``).
+        ttl_hours: Hours until expiry (default 1; the shell re-mints).
+        metadata: Additional claims to embed.
+        sign: Whether to PGP-sign the token.
+
+    Returns:
+        A :class:`SignedToken` whose payload has ``audience`` set and
+        ``token_type`` = CAPABILITY.
+    """
+    issuer_fp = _get_issuer_fingerprint(home)
+    now = datetime.now(timezone.utc)
+
+    payload = TokenPayload(
+        token_id="",
+        token_type=TokenType.CAPABILITY,
+        issuer=issuer_fp,
+        subject=subject,
+        capabilities=list(scopes),
+        issued_at=now,
+        expires_at=now + timedelta(hours=ttl_hours) if ttl_hours else None,
+        metadata=metadata or {},
+        audience=audience,
+    )
+
+    payload.token_id = _compute_token_id(payload)
+
+    token = SignedToken(payload=payload)
+
+    if sign:
+        signature = _pgp_sign_payload(payload, home)
+        if signature:
+            token.signature = signature
+            token.verified = True
+
+    _store_token(home, token)
+    logger.info(
+        "Minted audience token %s for %s (audience=%s, scopes=%s)",
+        payload.token_id[:12],
+        subject,
+        audience,
+        ",".join(scopes),
+    )
+    return token
+
+
+def verify_audience_token(
+    token: SignedToken,
+    audience: str,
+    *,
+    home: Optional[Path] = None,
+) -> bool:
+    """Verify a token AND that it is scoped to the expected audience.
+
+    This is :func:`verify_token` (signature + time validity) plus an audience
+    match. It fails closed: a signature/validity failure, an audience mismatch,
+    or an unscoped token (``audience is None``) when an audience is required all
+    return False.
+
+    Args:
+        token: The signed token to verify.
+        audience: The audience the token must be scoped to.
+        home: Agent home for accessing the keyring.
+
+    Returns:
+        True only if the signature/validity checks pass AND the token's
+        ``audience`` equals ``audience``.
+    """
+    if token.payload.audience != audience:
+        logger.warning(
+            "Token %s audience mismatch (have=%r, want=%r)",
+            token.payload.token_id[:12],
+            token.payload.audience,
+            audience,
+        )
+        return False
+
+    return verify_token(token, home)
+
+
+def has_scope(token: SignedToken, scope: str) -> bool:
+    """Check whether a signed token grants a given scope.
+
+    Convenience wrapper over :meth:`TokenPayload.has_scope` (honours the ``*``
+    wildcard). Does NOT verify the signature; callers that need trust should
+    pair this with :func:`verify_audience_token`.
+
+    Args:
+        token: The signed token to inspect.
+        scope: The scope string to check (e.g. 'chat.send').
+
+    Returns:
+        True if the token's scopes include ``scope`` (or ALL).
+    """
+    return token.payload.has_scope(scope)
 
 
 def revoke_token(home: Path, token_id: str) -> bool:
@@ -341,17 +487,22 @@ def _get_issuer_fingerprint(home: Path) -> str:
 
 
 def _compute_token_id(payload: TokenPayload) -> str:
-    """Compute a deterministic token ID from the payload content."""
-    content = json.dumps(
-        {
-            "issuer": payload.issuer,
-            "subject": payload.subject,
-            "capabilities": sorted(payload.capabilities),
-            "issued_at": payload.issued_at.isoformat(),
-            "type": payload.token_type.value,
-        },
-        sort_keys=True,
-    )
+    """Compute a deterministic token ID from the payload content.
+
+    The ``audience`` field is folded into the hash ONLY when it is set. Legacy
+    tokens (``audience=None``) therefore hash to exactly the same id they did
+    before the field existed, keeping the change fully backward-compatible.
+    """
+    content_fields = {
+        "issuer": payload.issuer,
+        "subject": payload.subject,
+        "capabilities": sorted(payload.capabilities),
+        "issued_at": payload.issued_at.isoformat(),
+        "type": payload.token_type.value,
+    }
+    if payload.audience is not None:
+        content_fields["audience"] = payload.audience
+    content = json.dumps(content_fields, sort_keys=True)
     return hashlib.sha256(content.encode()).hexdigest()
 
 
@@ -461,6 +612,9 @@ __all__ = [
     "SignedToken",
     "issue_token",
     "verify_token",
+    "mint_audience_token",
+    "verify_audience_token",
+    "has_scope",
     "revoke_token",
     "is_revoked",
     "list_tokens",

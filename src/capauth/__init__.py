@@ -10,6 +10,20 @@ import os
 from pathlib import Path
 
 from .agent_identity import AgentIdentity, resolve_agent_identity
+from .pairing import (
+    DeviceRecord,
+    Enrollment,
+    EnrollmentMode,
+    PairingError,
+    PairingStore,
+    PairingWindow,
+    approve,
+    enroll_device,
+    list_devices,
+    mode_satisfies,
+    open_window,
+    revoke,
+)
 from .tokens import (
     Capability,
     SignedToken,
@@ -45,6 +59,19 @@ __all__ = [
     "AgentIdentity",
     "resolve_agent_identity",
     "resolve_capauth_home",
+    # pairing kernel (spine M2: enrollment modes + operator window)
+    "enroll_device",
+    "approve",
+    "revoke",
+    "list_devices",
+    "open_window",
+    "mode_satisfies",
+    "PairingError",
+    "EnrollmentMode",
+    "Enrollment",
+    "DeviceRecord",
+    "PairingWindow",
+    "PairingStore",
     # tokens (kernel track M1: moved verbatim from skcapstone)
     "Capability",
     "SignedToken",
@@ -75,7 +102,7 @@ __all__ = [
     "save_calibration",
 ]
 
-__version__ = "0.2.5"
+__version__ = "0.2.6"
 
 SKCAPSTONE_HOME = Path.home() / ".skcapstone"
 DEFAULT_CAPAUTH_DIR = SKCAPSTONE_HOME / "capauth"

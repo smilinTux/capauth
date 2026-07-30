@@ -125,7 +125,7 @@ __all__ = [
     "save_calibration",
 ]
 
-__version__ = "0.2.11"
+__version__ = "0.2.12"
 
 SKCAPSTONE_HOME = Path.home() / ".skcapstone"
 DEFAULT_CAPAUTH_DIR = SKCAPSTONE_HOME / "capauth"

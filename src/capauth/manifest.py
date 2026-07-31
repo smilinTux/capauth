@@ -55,8 +55,10 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import subprocess
 import tempfile
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -68,6 +70,9 @@ logger = logging.getLogger("capauth.manifest")
 #: Conventional suffix for a manifest's detached signature file.
 DEFAULT_SIG_SUFFIX = ".sig"
 
+#: Schema version stamped into a freshly created registry file.
+REGISTRY_SCHEMA_VERSION = "1.0"
+
 
 class ManifestSigningError(CapAuthError):
     """Signing a manifest failed: gpg unavailable, no signer key, or a gpg error.
@@ -75,6 +80,17 @@ class ManifestSigningError(CapAuthError):
     Subclasses :class:`~capauth.exceptions.CapAuthError` so existing callers that
     catch ``CapAuthError`` keep working. Only the *signing* path raises;
     verification never raises (it fails closed by returning ``False``).
+    """
+
+
+class ManifestRegistryError(CapAuthError):
+    """A registry operation failed: unreadable/corrupt ``modules.json``, a
+    manifest with no ``id``, or an unknown module id on update/removal.
+
+    Subclasses :class:`~capauth.exceptions.CapAuthError`. Registry *mutations*
+    (register/unregister/toggle) raise on bad input, but :func:`list_registered`
+    never raises for a bad entry -- it fails that entry closed instead (marks it
+    NOT ok) so one broken module cannot blind the operator to the rest.
     """
 
 
@@ -314,6 +330,329 @@ def verify_manifest(
     return True
 
 
+# ---------------------------------------------------------------------------
+# Shell module registry (umbrella-shell design section 5.3)
+# ---------------------------------------------------------------------------
+#
+# The umbrella shell mounts a subapp only from a *signed* index. That index is a
+# static, capauth-signed config on each node -- ``<skcapstone-home>/shell/
+# modules.json`` -- listing each module's manifest by local-file path (or a
+# ``/.well-known/`` URL) plus its detached capauth signature and the operator's
+# enable flag. The shell REFUSES any manifest whose detached signature does not
+# verify. The functions below are the register/list/verify index tooling on top
+# of the sign/verify primitives above; they add no new crypto -- verification is
+# always :func:`verify_manifest` over the manifest's canonical bytes.
+#
+# On-disk schema (``modules.json``)::
+#
+#     {
+#       "schema_version": "1.0",
+#       "modules": [
+#         {
+#           "id": "skos",                       # from the manifest's `id` field
+#           "path": "/abs/skos.skworld-module.json",   # local file or well-known URL
+#           "sig": "/abs/skos.skworld-module.json.sig", # detached signature path
+#           "enabled": true,                    # operator enable flag
+#           "registered_at": "2026-07-31T12:00:00Z"     # first-registration UTC
+#         }
+#       ]
+#     }
+#
+# ``list_registered`` annotates each entry with a LIVE ``signature`` verdict --
+# one of ``ok`` / ``failed`` / ``missing-sig`` / ``missing-manifest`` -- computed
+# by re-verifying the signature against the manifest's current canonical bytes.
+
+
+def shell_home(home: Path | str | None = None) -> Path:
+    """Resolve the skcapstone home that holds the shell registry.
+
+    Honors ``$SKCAPSTONE_HOME`` (mirroring skos' ``_skcapstone_home``) so the
+    registry the shell reads and the one capauth writes always agree:
+
+    1. explicit ``home`` argument;
+    2. ``$SKCAPSTONE_HOME`` if set and non-empty;
+    3. ``~/.skcapstone``.
+
+    Args:
+        home: Explicit skcapstone home override.
+
+    Returns:
+        The resolved skcapstone home directory (not the ``shell/`` subdir).
+    """
+    if home is not None:
+        return Path(home).expanduser()
+    env = os.environ.get("SKCAPSTONE_HOME", "").strip()
+    return Path(env).expanduser() if env else Path.home() / ".skcapstone"
+
+
+def registry_path(home: Path | str | None = None) -> Path:
+    """Return the shell module-registry file path (``<home>/shell/modules.json``)."""
+    return shell_home(home) / "shell" / "modules.json"
+
+
+def load_registry(home: Path | str | None = None) -> dict[str, Any]:
+    """Load ``modules.json``, or an empty skeleton when it does not exist yet.
+
+    Args:
+        home: skcapstone home override (see :func:`shell_home`).
+
+    Returns:
+        The registry document ``{"schema_version": ..., "modules": [...]}``. A
+        missing file yields a fresh in-memory skeleton (not written to disk).
+
+    Raises:
+        ManifestRegistryError: if the file exists but is not readable, is not
+            valid JSON, or does not carry a ``modules`` list.
+    """
+    path = registry_path(home)
+    if not path.exists():
+        return {"schema_version": REGISTRY_SCHEMA_VERSION, "modules": []}
+    try:
+        doc = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        raise ManifestRegistryError(f"unreadable registry {path}: {exc}") from exc
+    if not isinstance(doc, dict) or not isinstance(doc.get("modules"), list):
+        raise ManifestRegistryError(
+            f"registry {path} is malformed: expected an object with a 'modules' list"
+        )
+    doc.setdefault("schema_version", REGISTRY_SCHEMA_VERSION)
+    return doc
+
+
+def save_registry(doc: dict[str, Any], home: Path | str | None = None) -> Path:
+    """Write ``doc`` to ``modules.json`` deterministically, creating dirs as needed.
+
+    Args:
+        doc: The registry document to persist.
+        home: skcapstone home override (see :func:`shell_home`).
+
+    Returns:
+        The path written.
+    """
+    path = registry_path(home)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        json.dumps(doc, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+    )
+    return path
+
+
+def _manifest_id(manifest_path: Path) -> str:
+    """Read a manifest file and return its ``id`` field.
+
+    Raises:
+        ManifestRegistryError: if the file is unreadable, is not valid JSON, or
+            has no non-empty string ``id``.
+    """
+    try:
+        obj = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        raise ManifestRegistryError(
+            f"cannot read manifest {manifest_path}: {exc}"
+        ) from exc
+    mid = obj.get("id") if isinstance(obj, dict) else None
+    if not isinstance(mid, str) or not mid.strip():
+        raise ManifestRegistryError(
+            f"manifest {manifest_path} has no non-empty string 'id' field"
+        )
+    return mid.strip()
+
+
+def register_manifest(
+    manifest_path: Path | str,
+    *,
+    sig_path: Path | str | None = None,
+    enabled: bool = True,
+    home: Path | str | None = None,
+) -> dict[str, Any]:
+    """Add or update a module entry in ``modules.json`` (idempotent upsert by id).
+
+    The module id is derived from the manifest's ``id`` field. The default
+    signature path is ``<manifest_path>.sig``. Local file paths are stored
+    absolute (resolved); a ``/.well-known/`` URL is stored verbatim. Creates
+    ``modules.json`` if absent. Re-registering the same id updates its
+    path/sig/enabled in place while preserving the original ``registered_at``.
+
+    Args:
+        manifest_path: Path to the manifest file whose ``id`` names the module.
+        sig_path: Detached-signature path. Defaults to ``manifest_path + ".sig"``.
+        enabled: Whether the shell may mount this module.
+        home: skcapstone home override (see :func:`shell_home`).
+
+    Returns:
+        The stored entry dict.
+
+    Raises:
+        ManifestRegistryError: if the manifest is unreadable or has no ``id``.
+    """
+    mpath = Path(manifest_path).expanduser()
+    if _is_url(str(manifest_path)):
+        raise ManifestRegistryError(
+            "register_manifest needs a local manifest file to read its id; "
+            "a well-known URL cannot be registered without a local copy"
+        )
+    mid = _manifest_id(mpath)
+    stored_manifest = str(mpath.resolve())
+
+    if sig_path is not None:
+        stored_sig = (
+            str(sig_path)
+            if _is_url(str(sig_path))
+            else str(Path(sig_path).expanduser().resolve())
+        )
+    else:
+        stored_sig = stored_manifest + DEFAULT_SIG_SUFFIX
+
+    doc = load_registry(home)
+    entry: dict[str, Any] | None = None
+    for existing in doc["modules"]:
+        if existing.get("id") == mid:
+            entry = existing
+            break
+
+    if entry is None:
+        entry = {
+            "id": mid,
+            "path": stored_manifest,
+            "sig": stored_sig,
+            "enabled": bool(enabled),
+            "registered_at": datetime.now(timezone.utc)
+            .isoformat(timespec="seconds")
+            .replace("+00:00", "Z"),
+        }
+        doc["modules"].append(entry)
+    else:
+        entry["path"] = stored_manifest
+        entry["sig"] = stored_sig
+        entry["enabled"] = bool(enabled)
+
+    save_registry(doc, home)
+    return dict(entry)
+
+
+def unregister_manifest(module_id: str, home: Path | str | None = None) -> bool:
+    """Remove a module entry by id.
+
+    Args:
+        module_id: The module id to drop.
+        home: skcapstone home override (see :func:`shell_home`).
+
+    Returns:
+        ``True`` if an entry was removed, ``False`` if no such id was registered.
+    """
+    doc = load_registry(home)
+    before = len(doc["modules"])
+    doc["modules"] = [m for m in doc["modules"] if m.get("id") != module_id]
+    if len(doc["modules"]) == before:
+        return False
+    save_registry(doc, home)
+    return True
+
+
+def set_module_enabled(
+    module_id: str, enabled: bool, home: Path | str | None = None
+) -> dict[str, Any]:
+    """Toggle a module's ``enabled`` flag.
+
+    Args:
+        module_id: The module id to toggle.
+        enabled: New enabled state.
+        home: skcapstone home override (see :func:`shell_home`).
+
+    Returns:
+        The updated entry dict.
+
+    Raises:
+        ManifestRegistryError: if ``module_id`` is not registered.
+    """
+    doc = load_registry(home)
+    for entry in doc["modules"]:
+        if entry.get("id") == module_id:
+            entry["enabled"] = bool(enabled)
+            save_registry(doc, home)
+            return dict(entry)
+    raise ManifestRegistryError(f"module id not registered: {module_id!r}")
+
+
+def _is_url(value: str) -> bool:
+    """Whether ``value`` looks like a fetchable http(s) URL rather than a path."""
+    return value.startswith("http://") or value.startswith("https://")
+
+
+def _verify_entry_signature(
+    entry: dict[str, Any], *, expected_signer: str | None
+) -> str:
+    """Return the live signature verdict for one registry entry. Never raises.
+
+    Verdicts:
+
+    * ``ok`` -- a present detached signature verifies over the manifest's
+      canonical bytes (and matches ``expected_signer`` when given);
+    * ``failed`` -- signature present but does not verify (tampered manifest,
+      bad/expired/revoked or wrong-signer signature);
+    * ``missing-sig`` -- the signature file is absent or empty;
+    * ``missing-manifest`` -- the manifest file is absent or unreadable, or the
+      entry references a remote URL this tooling cannot fetch.
+    """
+    mpath = entry.get("path", "")
+    spath = entry.get("sig", "")
+    if not isinstance(mpath, str) or _is_url(mpath):
+        # v1 tooling verifies local files only; a remote manifest is unfetchable
+        # here, so it fails closed rather than reporting a bogus ``ok``.
+        return "missing-manifest"
+    try:
+        raw = Path(mpath).expanduser().read_bytes()
+    except OSError:
+        return "missing-manifest"
+    try:
+        canon = canonical_manifest_bytes(raw)
+    except ManifestSigningError:
+        return "failed"
+
+    if not isinstance(spath, str) or _is_url(spath):
+        return "missing-sig"
+    try:
+        sig = Path(spath).expanduser().read_text(encoding="utf-8")
+    except OSError:
+        return "missing-sig"
+    if not sig.strip():
+        return "missing-sig"
+
+    return "ok" if verify_manifest(canon, sig, expected_signer=expected_signer) else "failed"
+
+
+def list_registered(
+    home: Path | str | None = None, *, expected_signer: str | None = None
+) -> list[dict[str, Any]]:
+    """Return registry entries, each annotated with a live signature verdict.
+
+    Each returned dict is a copy of the stored entry plus a ``signature`` key
+    holding one of ``ok`` / ``failed`` / ``missing-sig`` / ``missing-manifest``
+    (see :func:`_verify_entry_signature`) and preserves the entry's ``enabled``
+    flag. Fail-closed: a broken entry is marked NOT ok rather than crashing the
+    listing, so one bad module cannot hide the rest.
+
+    Args:
+        home: skcapstone home override (see :func:`shell_home`).
+        expected_signer: Optional fingerprint/uid to pin every entry's signer to
+            (e.g. the operator identity). ``None`` accepts any cryptographically
+            valid signature.
+
+    Returns:
+        A list of annotated entry dicts, in registry order.
+    """
+    doc = load_registry(home)
+    annotated: list[dict[str, Any]] = []
+    for entry in doc["modules"]:
+        out = dict(entry)
+        out["enabled"] = bool(entry.get("enabled", True))
+        out["signature"] = _verify_entry_signature(
+            entry, expected_signer=expected_signer
+        )
+        annotated.append(out)
+    return annotated
+
+
 __all__ = [
     "canonical_manifest_bytes",
     "is_canonical",
@@ -321,5 +660,15 @@ __all__ = [
     "sign_manifest",
     "verify_manifest",
     "ManifestSigningError",
+    "ManifestRegistryError",
     "DEFAULT_SIG_SUFFIX",
+    "REGISTRY_SCHEMA_VERSION",
+    "shell_home",
+    "registry_path",
+    "load_registry",
+    "save_registry",
+    "register_manifest",
+    "unregister_manifest",
+    "set_module_enabled",
+    "list_registered",
 ]

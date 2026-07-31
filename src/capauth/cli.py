@@ -410,6 +410,172 @@ def manifest_verify(
         raise SystemExit(1)
 
 
+#: How each live signature verdict renders in the ``manifest list`` table.
+_SIG_VERDICT_STYLE = {
+    "ok": "[green]ok[/]",
+    "failed": "[bold red]failed[/]",
+    "missing-sig": "[yellow]missing-sig[/]",
+    "missing-manifest": "[yellow]missing-manifest[/]",
+}
+
+
+@manifest.command("register")
+@click.argument("manifest_path", type=click.Path(exists=True, dir_okay=False))
+@click.option(
+    "--signature", "--sig", "sig_path",
+    type=click.Path(dir_okay=False), default=None,
+    help="Detached signature path to record (default: <manifest>.sig).",
+)
+@click.option(
+    "--disabled", is_flag=True, default=False,
+    help="Register the module but leave it disabled (shell will not mount it).",
+)
+@click.pass_context
+def manifest_register(
+    ctx: click.Context,
+    manifest_path: str,
+    sig_path: Optional[str],
+    disabled: bool,
+) -> None:
+    """Register (or update) a module manifest in the shell registry (modules.json)."""
+    from .manifest import ManifestRegistryError, register_manifest, registry_path
+
+    home = ctx.obj.get("home")
+    try:
+        entry = register_manifest(
+            manifest_path, sig_path=sig_path, enabled=not disabled, home=home
+        )
+    except ManifestRegistryError as exc:
+        console.print(f"[bold red]Error:[/] {exc}")
+        raise SystemExit(1)
+
+    state = "enabled" if entry["enabled"] else "disabled"
+    console.print(
+        f"[green]Registered[/] module [bold]{entry['id']}[/] ({state}) "
+        f"in {registry_path(home)}"
+    )
+
+
+@manifest.command("list")
+@click.option(
+    "--expected-signer", "-e", default=None,
+    help="Pin every entry's signer to this fingerprint/uid (default: any valid key).",
+)
+@click.pass_context
+def manifest_list(ctx: click.Context, expected_signer: Optional[str]) -> None:
+    """List registered modules with a live signature verdict for each."""
+    from .manifest import ManifestRegistryError, list_registered, registry_path
+
+    home = ctx.obj.get("home")
+    try:
+        entries = list_registered(home, expected_signer=expected_signer)
+    except ManifestRegistryError as exc:
+        console.print(f"[bold red]Error:[/] {exc}")
+        raise SystemExit(1)
+
+    if not entries:
+        console.print(
+            f"[yellow]No modules registered[/] ({registry_path(home)} is empty or absent)."
+        )
+        return
+
+    table = Table(title="SKWorld shell modules (section 5.3)")
+    table.add_column("id", style="bold")
+    table.add_column("enabled")
+    table.add_column("signature")
+    table.add_column("path", overflow="fold")
+    for e in entries:
+        enabled = "[green]yes[/]" if e["enabled"] else "[dim]no[/]"
+        verdict = _SIG_VERDICT_STYLE.get(e["signature"], e["signature"])
+        table.add_row(str(e.get("id", "?")), enabled, verdict, str(e.get("path", "")))
+    console.print(table)
+
+
+@manifest.command("verify-all")
+@click.option(
+    "--expected-signer", "-e", default=None,
+    help="Pin every entry's signer to this fingerprint/uid (default: any valid key).",
+)
+@click.pass_context
+def manifest_verify_all(ctx: click.Context, expected_signer: Optional[str]) -> None:
+    """Verify every ENABLED module's signature. Exit nonzero if any enabled entry fails."""
+    from .manifest import ManifestRegistryError, list_registered
+
+    home = ctx.obj.get("home")
+    try:
+        entries = list_registered(home, expected_signer=expected_signer)
+    except ManifestRegistryError as exc:
+        console.print(f"[bold red]Error:[/] {exc}")
+        raise SystemExit(1)
+
+    failures = 0
+    checked = 0
+    for e in entries:
+        if not e["enabled"]:
+            console.print(f"[dim]skip[/] {e.get('id')} (disabled)")
+            continue
+        checked += 1
+        if e["signature"] == "ok":
+            console.print(f"[green]ok[/]   {e.get('id')}")
+        else:
+            failures += 1
+            console.print(f"[bold red]FAIL[/] {e.get('id')} -- {e['signature']}")
+
+    if failures:
+        console.print(
+            f"[bold red]{failures} of {checked} enabled module(s) failed verification.[/]"
+        )
+        raise SystemExit(1)
+    console.print(f"[bold green]All {checked} enabled module(s) verify.[/]")
+
+
+@manifest.command("unregister")
+@click.argument("module_id")
+@click.pass_context
+def manifest_unregister(ctx: click.Context, module_id: str) -> None:
+    """Remove a module from the shell registry by id."""
+    from .manifest import unregister_manifest
+
+    home = ctx.obj.get("home")
+    if unregister_manifest(module_id, home=home):
+        console.print(f"[green]Unregistered[/] module [bold]{module_id}[/].")
+    else:
+        console.print(f"[yellow]No such module registered:[/] {module_id}")
+        raise SystemExit(1)
+
+
+@manifest.command("enable")
+@click.argument("module_id")
+@click.pass_context
+def manifest_enable(ctx: click.Context, module_id: str) -> None:
+    """Enable a registered module so the shell may mount it."""
+    from .manifest import ManifestRegistryError, set_module_enabled
+
+    home = ctx.obj.get("home")
+    try:
+        set_module_enabled(module_id, True, home=home)
+    except ManifestRegistryError as exc:
+        console.print(f"[bold red]Error:[/] {exc}")
+        raise SystemExit(1)
+    console.print(f"[green]Enabled[/] module [bold]{module_id}[/].")
+
+
+@manifest.command("disable")
+@click.argument("module_id")
+@click.pass_context
+def manifest_disable(ctx: click.Context, module_id: str) -> None:
+    """Disable a registered module so the shell will not mount it."""
+    from .manifest import ManifestRegistryError, set_module_enabled
+
+    home = ctx.obj.get("home")
+    try:
+        set_module_enabled(module_id, False, home=home)
+    except ManifestRegistryError as exc:
+        console.print(f"[bold red]Error:[/] {exc}")
+        raise SystemExit(1)
+    console.print(f"[yellow]Disabled[/] module [bold]{module_id}[/].")
+
+
 @main.command("export-pubkey")
 @click.option(
     "--output", "-o", type=click.Path(), default=None, help="Write to file instead of stdout."

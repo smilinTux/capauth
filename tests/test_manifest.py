@@ -21,10 +21,17 @@ import subprocess
 import pytest
 
 from capauth.manifest import (
+    ManifestRegistryError,
     ManifestSigningError,
     canonical_manifest_bytes,
     is_canonical,
+    list_registered,
+    load_registry,
+    register_manifest,
+    registry_path,
+    set_module_enabled,
     sign_manifest,
+    unregister_manifest,
     verify_manifest,
 )
 
@@ -195,3 +202,201 @@ def test_sign_raises_on_unknown_signer(signer):
     canon = canonical_manifest_bytes(SAMPLE_MANIFEST)
     with pytest.raises(ManifestSigningError):
         sign_manifest(canon, signer="DEADBEEFDEADBEEFDEADBEEFDEADBEEFDEADBEEF")
+
+
+# --- shell module registry (section 5.3) ---------------------------------------
+
+
+def _module_manifest(module_id: str) -> dict:
+    """A minimal SKWorld module manifest carrying an ``id`` field."""
+    return {"id": module_id, "schemaVersion": "1.0", "name": module_id.upper()}
+
+
+def _write_manifest(dir_path, module_id: str):
+    """Write a canonical manifest file for ``module_id``; return its Path."""
+    path = dir_path / f"{module_id}.skworld-module.json"
+    path.write_bytes(canonical_manifest_bytes(_module_manifest(module_id)))
+    return path
+
+
+def _sign_file(manifest_path, signer_fp):
+    """Sign a manifest file into ``<path>.sig`` and return the sig Path."""
+    canon = canonical_manifest_bytes(manifest_path.read_bytes())
+    sig = sign_manifest(canon, signer=signer_fp)
+    sig_path = manifest_path.with_name(manifest_path.name + ".sig")
+    sig_path.write_text(sig, encoding="utf-8")
+    return sig_path
+
+
+@pytest.fixture
+def shell_home(tmp_path, monkeypatch):
+    """An isolated $SKCAPSTONE_HOME so the registry never touches the real one."""
+    home = tmp_path / "skcapstone"
+    home.mkdir()
+    monkeypatch.setenv("SKCAPSTONE_HOME", str(home))
+    return home
+
+
+def test_registry_path_honors_skcapstone_home(shell_home):
+    assert registry_path() == shell_home / "shell" / "modules.json"
+
+
+def test_load_registry_returns_empty_skeleton_when_absent(shell_home):
+    doc = load_registry()
+    assert doc["modules"] == []
+    assert not registry_path().exists(), "load must not create the file"
+
+
+def test_register_creates_registry_and_derives_id(shell_home, tmp_path):
+    manifest = _write_manifest(tmp_path, "skos")
+    entry = register_manifest(manifest)
+    assert entry["id"] == "skos"
+    assert entry["enabled"] is True
+    assert entry["path"] == str(manifest.resolve())
+    assert entry["sig"] == str(manifest.resolve()) + ".sig"
+    assert "registered_at" in entry
+    assert registry_path().exists()
+    assert len(load_registry()["modules"]) == 1
+
+
+def test_register_is_idempotent_upsert_by_id(shell_home, tmp_path):
+    manifest = _write_manifest(tmp_path, "skos")
+    first = register_manifest(manifest)
+    # Re-register the same id disabled with an explicit sig path.
+    other_sig = tmp_path / "custom.sig"
+    other_sig.write_text("x", encoding="utf-8")
+    second = register_manifest(manifest, sig_path=other_sig, enabled=False)
+    modules = load_registry()["modules"]
+    assert len(modules) == 1, "same id must upsert, not duplicate"
+    assert second["enabled"] is False
+    assert second["sig"] == str(other_sig.resolve())
+    assert second["registered_at"] == first["registered_at"], "registered_at preserved"
+
+
+def test_register_rejects_manifest_without_id(shell_home, tmp_path):
+    bad = tmp_path / "noid.json"
+    bad.write_bytes(canonical_manifest_bytes({"name": "no id here"}))
+    with pytest.raises(ManifestRegistryError):
+        register_manifest(bad)
+
+
+def test_unregister_removes_entry(shell_home, tmp_path):
+    manifest = _write_manifest(tmp_path, "skos")
+    register_manifest(manifest)
+    assert unregister_manifest("skos") is True
+    assert load_registry()["modules"] == []
+    assert unregister_manifest("skos") is False, "second removal is a no-op"
+
+
+def test_set_module_enabled_toggles(shell_home, tmp_path):
+    manifest = _write_manifest(tmp_path, "skos")
+    register_manifest(manifest)
+    set_module_enabled("skos", False)
+    assert load_registry()["modules"][0]["enabled"] is False
+    set_module_enabled("skos", True)
+    assert load_registry()["modules"][0]["enabled"] is True
+    with pytest.raises(ManifestRegistryError):
+        set_module_enabled("nonesuch", True)
+
+
+def test_list_reports_missing_sig(shell_home, tmp_path):
+    manifest = _write_manifest(tmp_path, "skos")  # no .sig written
+    register_manifest(manifest)
+    (annotated,) = list_registered()
+    assert annotated["signature"] == "missing-sig"
+    assert annotated["enabled"] is True
+
+
+def test_list_reports_missing_manifest(shell_home, tmp_path):
+    manifest = _write_manifest(tmp_path, "skos")
+    register_manifest(manifest)
+    manifest.unlink()  # delete the manifest after registering
+    (annotated,) = list_registered()
+    assert annotated["signature"] == "missing-manifest"
+
+
+@_requires_gpg
+def test_list_reports_ok_failed_and_missing_together(shell_home, tmp_path, signer):
+    """Good, tampered, and missing-sig entries coexist; one bad entry never
+    crashes the listing (fail-closed per section 5.3)."""
+    # good: canonical manifest + valid sig
+    good = _write_manifest(tmp_path, "skos")
+    _sign_file(good, signer)
+    register_manifest(good)
+
+    # bad: valid sig, then the manifest is tampered on disk after signing
+    bad = _write_manifest(tmp_path, "skchat")
+    _sign_file(bad, signer)
+    bad.write_bytes(canonical_manifest_bytes({"id": "skchat", "name": "TAMPERED"}))
+    register_manifest(bad)
+
+    # missing-sig: manifest with no signature file
+    nosig = _write_manifest(tmp_path, "skcode")
+    register_manifest(nosig)
+
+    verdicts = {e["id"]: e["signature"] for e in list_registered()}
+    assert verdicts == {"skos": "ok", "skchat": "failed", "skcode": "missing-sig"}
+
+
+@_requires_gpg
+def test_list_expected_signer_pin_rejects_wrong_key(shell_home, tmp_path, signer):
+    good = _write_manifest(tmp_path, "skos")
+    _sign_file(good, signer)
+    register_manifest(good)
+    assert list_registered()[0]["signature"] == "ok"
+    # Pin to a fingerprint that did not sign -> fails closed.
+    wrong = "0" * 40
+    assert list_registered(expected_signer=wrong)[0]["signature"] == "failed"
+    assert list_registered(expected_signer=signer)[0]["signature"] == "ok"
+
+
+# --- CLI: verify-all exit code -------------------------------------------------
+
+
+@_requires_gpg
+def test_cli_verify_all_exit_code(shell_home, tmp_path, signer):
+    from click.testing import CliRunner
+
+    from capauth.cli import main
+
+    good = _write_manifest(tmp_path, "skos")
+    _sign_file(good, signer)
+    register_manifest(good)
+
+    runner = CliRunner()
+    # All enabled entries verify -> exit 0.
+    ok = runner.invoke(main, ["manifest", "verify-all"])
+    assert ok.exit_code == 0, ok.output
+
+    # Add a tampered (enabled) entry -> exit nonzero.
+    bad = _write_manifest(tmp_path, "skchat")
+    _sign_file(bad, signer)
+    bad.write_bytes(canonical_manifest_bytes({"id": "skchat", "name": "TAMPERED"}))
+    register_manifest(bad)
+    failed = runner.invoke(main, ["manifest", "verify-all"])
+    assert failed.exit_code != 0, failed.output
+
+    # Disabling the bad entry restores a clean pass (verify-all skips disabled).
+    set_module_enabled("skchat", False)
+    passes = runner.invoke(main, ["manifest", "verify-all"])
+    assert passes.exit_code == 0, passes.output
+
+
+@_requires_gpg
+def test_cli_register_and_list_roundtrip(shell_home, tmp_path, signer):
+    from click.testing import CliRunner
+
+    from capauth.cli import main
+
+    manifest = _write_manifest(tmp_path, "skos")
+    _sign_file(manifest, signer)
+
+    runner = CliRunner()
+    reg = runner.invoke(main, ["manifest", "register", str(manifest)])
+    assert reg.exit_code == 0, reg.output
+    assert "skos" in reg.output
+
+    listing = runner.invoke(main, ["manifest", "list"])
+    assert listing.exit_code == 0, listing.output
+    assert "skos" in listing.output
+    assert "ok" in listing.output

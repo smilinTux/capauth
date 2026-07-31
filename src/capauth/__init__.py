@@ -10,6 +10,15 @@ import os
 from pathlib import Path
 
 from .agent_identity import AgentIdentity, resolve_agent_identity
+from .manifest import (
+    DEFAULT_SIG_SUFFIX,
+    ManifestSigningError,
+    canonical_manifest_bytes,
+    is_canonical,
+    operator_fingerprint,
+    sign_manifest,
+    verify_manifest,
+)
 from .authz import (
     DEFAULT_RULES,
     OBLIGATION_AUDIT,
@@ -73,6 +82,14 @@ __all__ = [
     "AgentIdentity",
     "resolve_agent_identity",
     "resolve_capauth_home",
+    # manifest signing (umbrella-shell signed module registry, section 5.3)
+    "sign_manifest",
+    "verify_manifest",
+    "canonical_manifest_bytes",
+    "is_canonical",
+    "operator_fingerprint",
+    "ManifestSigningError",
+    "DEFAULT_SIG_SUFFIX",
     # authz kernel (spine M3: deterministic decide() PDP)
     "decide",
     "Decision",

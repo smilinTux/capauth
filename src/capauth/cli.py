@@ -283,6 +283,133 @@ def profile_verify(ctx: click.Context) -> None:
         raise SystemExit(1)
 
 
+@main.group()
+def manifest() -> None:
+    """Sign and verify SKWorld module manifests (umbrella-shell registry section 5.3).
+
+    A subapp emits a deterministic sorted-key JSON manifest; the operator signs it
+    into a detached ``.sig`` with the operator identity key; the shell verifies
+    that signature against the operator identity before mounting the module.
+    """
+
+
+@manifest.command("sign")
+@click.argument("manifest_path", type=click.Path(exists=True, dir_okay=False))
+@click.option(
+    "--output", "-o", type=click.Path(), default=None,
+    help="Signature output path (default: <manifest>.sig).",
+)
+@click.option(
+    "--signer", "-s", default=None,
+    help="Signer key fingerprint/uid (default: operator identity).",
+)
+@click.option(
+    "--passphrase", "-p", default="",
+    help="Passphrase for the signer key (default: empty; supply for a protected key).",
+)
+@click.option(
+    "--require-canonical/--allow-noncanonical", default=True,
+    help="Refuse to sign a manifest whose bytes are not canonical sorted-key JSON.",
+)
+@click.pass_context
+def manifest_sign(
+    ctx: click.Context,
+    manifest_path: str,
+    output: Optional[str],
+    signer: Optional[str],
+    passphrase: str,
+    require_canonical: bool,
+) -> None:
+    """Sign a manifest file, writing a detached ASCII-armored signature."""
+    from .manifest import (
+        DEFAULT_SIG_SUFFIX,
+        ManifestSigningError,
+        is_canonical,
+        sign_manifest,
+    )
+
+    home = ctx.obj.get("home")
+    raw = Path(manifest_path).read_bytes()
+
+    if require_canonical and not is_canonical(raw):
+        console.print(
+            "[bold red]Error:[/] manifest is not canonical sorted-key JSON. "
+            "Re-emit it deterministically (the shell hashes the file as-is), "
+            "or pass --allow-noncanonical to sign the exact bytes anyway."
+        )
+        raise SystemExit(1)
+
+    try:
+        sig = sign_manifest(raw, signer=signer, home=home, passphrase=passphrase)
+    except ManifestSigningError as exc:
+        console.print(f"[bold red]Error:[/] {exc}")
+        raise SystemExit(1)
+
+    out = Path(output) if output else Path(str(manifest_path) + DEFAULT_SIG_SUFFIX)
+    out.write_text(sig, encoding="utf-8")
+    console.print(f"[green]Signed[/] {manifest_path} -> {out}")
+
+
+@manifest.command("verify")
+@click.argument("manifest_path", type=click.Path(exists=True, dir_okay=False))
+@click.option(
+    "--signature", "--sig", "sig_path",
+    type=click.Path(dir_okay=False), default=None,
+    help="Detached signature file (default: <manifest>.sig).",
+)
+@click.option(
+    "--expected-signer", "-e", default=None,
+    help="Require this signer fingerprint/uid (default: operator identity).",
+)
+@click.option(
+    "--any-signer", is_flag=True, default=False,
+    help="Accept any valid signer (skip operator-identity pinning).",
+)
+@click.pass_context
+def manifest_verify(
+    ctx: click.Context,
+    manifest_path: str,
+    sig_path: Optional[str],
+    expected_signer: Optional[str],
+    any_signer: bool,
+) -> None:
+    """Verify a manifest's detached signature. Fails closed (exit 1) on any doubt."""
+    from .manifest import (
+        DEFAULT_SIG_SUFFIX,
+        ManifestSigningError,
+        operator_fingerprint,
+        verify_manifest,
+    )
+
+    home = ctx.obj.get("home")
+    raw = Path(manifest_path).read_bytes()
+    sig_file = Path(sig_path) if sig_path else Path(str(manifest_path) + DEFAULT_SIG_SUFFIX)
+
+    if not sig_file.exists():
+        console.print(f"[bold red]INVALID:[/] signature file not found: {sig_file}")
+        raise SystemExit(1)
+
+    expected: Optional[str] = None
+    if not any_signer:
+        expected = expected_signer
+        if expected is None:
+            try:
+                expected = operator_fingerprint(home)
+            except ManifestSigningError as exc:
+                console.print(
+                    f"[bold red]Error:[/] {exc}. Pass --expected-signer or --any-signer."
+                )
+                raise SystemExit(1)
+
+    sig = sig_file.read_text(encoding="utf-8")
+    if verify_manifest(raw, sig, expected_signer=expected):
+        who = expected or "a trusted key"
+        console.print(f"[bold green]VALID[/] -- {manifest_path} signed by {who}")
+    else:
+        console.print(f"[bold red]INVALID[/] -- signature check failed for {manifest_path}")
+        raise SystemExit(1)
+
+
 @main.command("export-pubkey")
 @click.option(
     "--output", "-o", type=click.Path(), default=None, help="Write to file instead of stdout."

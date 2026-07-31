@@ -7,14 +7,22 @@ from unittest.mock import patch
 import pytest
 from fastapi.testclient import TestClient
 
+import capauth.service.app as svc_app
 from capauth.service.app import (
     QRChallengeResponse,
     QRStatusResponse,
-    _qr_results,
     app,
 )
 
 client = TestClient(app)
+
+# NOTE: inject completed-QR results via the LIVE module attribute
+# (``svc_app._qr_results``), never a name imported at module load. Other test
+# modules (e.g. test_oidc_idp_e2e) call ``importlib.reload`` on the service app,
+# which rebinds ``_qr_results`` to a fresh dict. A stale import-time reference
+# would then point at an orphaned dict the endpoint no longer reads, making these
+# polling tests fail purely on collection order. The endpoint always reads the
+# current module global, so writing through ``svc_app._qr_results`` stays correct.
 
 FAKE_FP = "A" * 40
 FAKE_ARMOR = "-----BEGIN PGP PUBLIC KEY BLOCK-----\nfake\n-----END PGP PUBLIC KEY BLOCK-----"
@@ -82,7 +90,7 @@ class TestQRStatus:
         """Polling after mobile auth should return authenticated with token."""
         # Simulate a completed QR auth by injecting into _qr_results
         test_nonce = "test-qr-nonce-123"
-        _qr_results[test_nonce] = {
+        svc_app._qr_results[test_nonce] = {
             "authenticated": True,
             "fingerprint": FAKE_FP,
             "oidc_claims": {"sub": FAKE_FP, "name": "Test"},
@@ -100,7 +108,7 @@ class TestQRStatus:
     def test_poll_consumes_result(self):
         """Authenticated result should be consumed after first poll."""
         test_nonce = "test-qr-consume-456"
-        _qr_results[test_nonce] = {
+        svc_app._qr_results[test_nonce] = {
             "authenticated": True,
             "fingerprint": FAKE_FP,
             "oidc_claims": {},
@@ -179,7 +187,7 @@ class TestQRFlowIntegration:
 
         # Step 3: Simulate mobile completing auth by injecting result directly
         # (Real crypto verification is tested in test_verifier.py)
-        _qr_results[nonce] = {
+        svc_app._qr_results[nonce] = {
             "authenticated": True,
             "fingerprint": FAKE_FP,
             "oidc_claims": {"sub": FAKE_FP, "name": "Mobile User"},

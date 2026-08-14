@@ -245,6 +245,77 @@ def check_identity_present(
     )
 
 
+def _key_summary(path: Path) -> tuple[Optional[str], str]:
+    """``(fingerprint, uid-ish label)`` for a key file, both best-effort."""
+    try:
+        import pgpy
+
+        key, _ = pgpy.PGPKey.from_file(str(path))
+        fpr = str(key.fingerprint).replace(" ", "")
+        uids = [str(u.name) for u in key.userids if str(u.name)]
+        emails = [str(u.email) for u in key.userids if str(u.email)]
+        label = uids[0] if uids else "?"
+        if emails:
+            label = f"{label} <{emails[0]}>"
+        return fpr, label
+    except Exception:
+        return None, "?"
+
+
+def check_keypair_match(private_key: Path, public_key: Path) -> CheckResult:
+    """private.asc and public.asc are the two halves of ONE key.
+
+    Discovered on Chef's primary node 2026-08-14: the identity held a private
+    key for ``test-agent <test-agent@skcapstone.local>`` next to a public key
+    for a completely different owner. Every signature it produced was
+    unverifiable by anyone holding the published key, and ``identity_present``
+    reported OK throughout because it only ever reads public.asc. Same shape as
+    the Jarvis incident, where a profile advertised a fingerprint the home did
+    not hold.
+
+    A key that cannot verify what it signs is not an identity, hence FAIL.
+    Missing halves are someone else's check to fail, so they only WARN here.
+    """
+    if not private_key.exists() or not public_key.exists():
+        return CheckResult(
+            "keypair_match",
+            Status.WARN,
+            "cannot compare the keypair: "
+            f"{'private.asc' if not private_key.exists() else 'public.asc'} is missing",
+            "restore the missing half; see the identity_present check.",
+        )
+
+    priv_fpr, priv_label = _key_summary(private_key)
+    pub_fpr, pub_label = _key_summary(public_key)
+    if priv_fpr is None or pub_fpr is None:
+        return CheckResult(
+            "keypair_match",
+            Status.WARN,
+            "cannot compare the keypair: a key is unreadable (PGPy unavailable "
+            "or the armor is malformed)",
+            "install PGPy, or re-export the identity keys.",
+        )
+
+    if priv_fpr == pub_fpr:
+        return CheckResult(
+            "keypair_match",
+            Status.OK,
+            f"private.asc and public.asc are the same key ({priv_fpr}, {pub_label})",
+        )
+
+    return CheckResult(
+        "keypair_match",
+        Status.FAIL,
+        "private.asc and public.asc do not match: "
+        f"private={priv_fpr} ({priv_label}) vs public={pub_fpr} ({pub_label}). "
+        "Nothing this identity signs can be verified against its published key.",
+        "identify which half is the stray key (the uid usually says), then "
+        "restore the correct counterpart from offline custody. Do NOT simply "
+        "re-export public.asc from the private key: that would publish a new "
+        "identity under the old name.",
+    )
+
+
 def check_private_key_permissions(private_key: Path) -> CheckResult:
     """The private key file is not group/world accessible (must be 0600)."""
     if not private_key.exists():
@@ -574,6 +645,7 @@ def run_custody_checks(
     p = paths or CustodyPaths.resolve(home)
     return [
         check_identity_present(p.private_key, p.public_key, p.profile, p.expected_fingerprint),
+        check_keypair_match(p.private_key, p.public_key),
         check_private_key_permissions(p.private_key),
         check_key_status(p.public_key),
         check_revocation_cert(p.revocation_cert),

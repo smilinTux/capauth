@@ -28,6 +28,7 @@ from pgpy.constants import (
     SymmetricKeyAlgorithm,
 )
 
+from capauth import custody
 from capauth.custody import (
     CheckResult,
     CustodyPaths,
@@ -36,6 +37,7 @@ from capauth.custody import (
     check_backups_configured,
     check_identity_present,
     check_key_status,
+    check_keypair_match,
     check_keystore_integrity,
     check_nextcloud_signing_key,
     check_private_key_permissions,
@@ -170,6 +172,7 @@ class TestHealthyHome:
         assert report["exit_code"] == 0
         assert {c["name"] for c in report["checks"]} == {
             "identity_present",
+            "keypair_match",
             "private_key_perms",
             "key_status",
             "revocation_cert",
@@ -417,3 +420,64 @@ class TestSerialization:
         results = [CheckResult("a", Status.OK, "ok"), CheckResult("b", Status.FAIL, "bad")]
         assert exit_code(results) == 1
         assert overall_status(results) is Status.FAIL
+
+
+# ── keypair correspondence (lumina incident, 2026-08-14) ──────────────────────
+#
+# On Chef's primary node the identity held private.asc for
+# "test-agent <test-agent@skcapstone.local>" alongside public.asc for
+# "dounoit <dounoit@gmail.com>": two unrelated keys in one identity dir. Every
+# signature it produced was unverifiable by anyone holding its published key,
+# and `capauth doctor` reported identity_present OK because it only ever read
+# public.asc. Same shape as the Jarvis incident, where a profile advertised a
+# fingerprint the home did not hold.
+#
+# A key that cannot verify what it signs is not an identity, so this is FAIL.
+
+
+def test_keypair_match_ok_on_a_real_pair(good_paths):
+    result = check_keypair_match(good_paths.private_key, good_paths.public_key)
+    assert result.status is Status.OK
+    assert result.name == "keypair_match"
+
+
+def test_keypair_match_fails_when_the_halves_are_different_keys(good_paths, tmp_path):
+    """The lumina incident, reproduced."""
+    stranger = _new_ed25519_key("Someone Else", "else@test.io")
+    good_paths.public_key.write_text(str(stranger.pubkey), encoding="utf-8")
+
+    result = check_keypair_match(good_paths.private_key, good_paths.public_key)
+    assert result.status is Status.FAIL
+    assert "do not match" in result.detail.lower()
+    # Both fingerprints must be NAMED, or the operator cannot tell which half
+    # is the wrong one and which key to go find.
+    assert str(stranger.fingerprint).replace(" ", "") in result.detail
+
+
+def test_keypair_match_reports_the_uids_so_the_stray_key_is_identifiable(good_paths):
+    """The uid is what made the lumina case diagnosable: 'test-agent' vs a
+    real address said immediately which half was the accident."""
+    stranger = _new_ed25519_key("test-agent", "test-agent@skcapstone.local")
+    good_paths.public_key.write_text(str(stranger.pubkey), encoding="utf-8")
+
+    result = check_keypair_match(good_paths.private_key, good_paths.public_key)
+    assert "test-agent" in result.detail
+
+
+def test_keypair_match_warns_when_a_half_is_missing(good_paths):
+    good_paths.public_key.unlink()
+    result = check_keypair_match(good_paths.private_key, good_paths.public_key)
+    assert result.status is Status.WARN  # identity_present already FAILs on this
+
+
+def test_keypair_match_runs_as_part_of_the_custody_suite(good_paths):
+    names = [r.name for r in run_custody_checks(paths=good_paths)]
+    assert "keypair_match" in names
+
+
+def test_a_mismatched_keypair_fails_the_whole_suite(good_paths):
+    stranger = _new_ed25519_key("Someone Else", "else@test.io")
+    good_paths.public_key.write_text(str(stranger.pubkey), encoding="utf-8")
+    results = run_custody_checks(paths=good_paths)
+    assert overall_status(results) is Status.FAIL
+    assert exit_code(results) == 1

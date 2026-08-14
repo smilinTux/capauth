@@ -183,6 +183,27 @@ class SignedToken(BaseModel):
         default=None, description="PGP detached signature (ASCII-armored)"
     )
     verified: bool = Field(default=False, description="Whether signature has been verified")
+    # CR-3.7 hybrid PQC leg (additive, opt-in; see :mod:`capauth.pqc_tokens`).
+    # Default None means a classical-only token, byte-identical on the wire to a
+    # pre-hybrid token. When present, an Ed25519 + ML-DSA-65 composite signs the
+    # SAME payload bytes the classical PGP leg signs.
+    sig_suite: Optional[str] = Field(
+        default=None, description="Signature suite id when a hybrid leg is attached"
+    )
+    hybrid_signature: Optional[str] = Field(
+        default=None, description="Base64 Ed25519 + ML-DSA-65 composite over the payload"
+    )
+    hybrid_ed25519_pub: Optional[str] = Field(
+        default=None, description="Base64 Ed25519 public key of the hybrid leg"
+    )
+    hybrid_mldsa_pub: Optional[str] = Field(
+        default=None, description="Base64 ML-DSA-65 public key of the hybrid leg"
+    )
+
+    @property
+    def is_hybrid(self) -> bool:
+        """True iff this token carries a hybrid PQC signature leg."""
+        return bool(self.hybrid_signature)
 
 
 def issue_token(
@@ -561,15 +582,19 @@ def export_token(token: SignedToken) -> str:
     Returns:
         JSON string suitable for sharing.
     """
-    return json.dumps(
-        {
-            "skcapstone_token": "1.0",
-            "payload": token.payload.model_dump(mode="json"),
-            "signature": token.signature,
-        },
-        indent=2,
-        default=str,
-    )
+    envelope = {
+        "skcapstone_token": "1.0",
+        "payload": token.payload.model_dump(mode="json"),
+        "signature": token.signature,
+    }
+    # Hybrid PQC leg (CR-3.7): added ONLY when present, so a classical token's
+    # exported bytes are unchanged from before the leg existed.
+    if token.is_hybrid:
+        envelope["sig_suite"] = token.sig_suite
+        envelope["hybrid_signature"] = token.hybrid_signature
+        envelope["hybrid_ed25519_pub"] = token.hybrid_ed25519_pub
+        envelope["hybrid_mldsa_pub"] = token.hybrid_mldsa_pub
+    return json.dumps(envelope, indent=2, default=str)
 
 
 def import_token(token_json: str) -> SignedToken:
@@ -592,6 +617,10 @@ def import_token(token_json: str) -> SignedToken:
             payload=TokenPayload(**data["payload"]),
             signature=data.get("signature"),
             verified=False,
+            sig_suite=data.get("sig_suite"),
+            hybrid_signature=data.get("hybrid_signature"),
+            hybrid_ed25519_pub=data.get("hybrid_ed25519_pub"),
+            hybrid_mldsa_pub=data.get("hybrid_mldsa_pub"),
         )
     except (json.JSONDecodeError, KeyError) as exc:
         raise ValueError(f"Invalid token format: {exc}") from exc
@@ -736,6 +765,11 @@ def _store_token(home: Path, token: SignedToken) -> None:
         "signature": token.signature,
         "verified": token.verified,
     }
+    if token.is_hybrid:
+        data["sig_suite"] = token.sig_suite
+        data["hybrid_signature"] = token.hybrid_signature
+        data["hybrid_ed25519_pub"] = token.hybrid_ed25519_pub
+        data["hybrid_mldsa_pub"] = token.hybrid_mldsa_pub
     token_file.write_text(json.dumps(data, indent=2, default=str), encoding="utf-8")
 
 

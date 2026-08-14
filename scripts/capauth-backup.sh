@@ -7,7 +7,10 @@
 #   2. The bunker pairing session store (`bunker_sessions.json`) - approved
 #      phone<->desktop pairings (session id + opaque join token, NO key material)
 #      persisted by the broker, when present.
-#   3. The Authentik Postgres DB (flows, stages, OAuth providers) - ONLY when a
+#   3. The identity PUBLIC key (`identity/public.asc`) - public material only,
+#      so `capauth doctor`'s backup_restorable check can PROVE the identity
+#      comes back, not just the keystore.
+#   4. The Authentik Postgres DB (flows, stages, OAuth providers) - ONLY when a
 #      target is configured. This holds the .13 edge SSO wiring for forgejo/sksso.
 #
 # What it deliberately does NOT touch (see docs/COLD_MACHINE_BOOTSTRAP_AND_DR.md):
@@ -35,12 +38,15 @@
 #   scripts/capauth-backup.sh --dry-run  # show what would happen, touch nothing
 #
 # Configuration (all via env, sane defaults):
-#   CAPAUTH_DB_PATH            keystore SQLite path (default ~/.capauth/service/keys.db)
+#   CAPAUTH_HOME               capauth home (default: ~/.skcapstone/capauth when it
+#                              exists, else legacy ~/.capauth; matches
+#                              capauth.resolve_capauth_home())
+#   CAPAUTH_DB_PATH            keystore SQLite path (default <home>/service/keys.db)
 #   CAPAUTH_BUNKER_STORE       bunker session store path (default
-#                              ~/.capauth/service/bunker_sessions.json; "" disables)
+#                              <home>/service/bunker_sessions.json; "" disables)
 #   CAPAUTH_DATA_VOLUME        docker volume holding /data/keys.db when the host
 #                              path is absent (default: capauth_data)
-#   CAPAUTH_BACKUP_DIR         where backups are written (default ~/.capauth/backups)
+#   CAPAUTH_BACKUP_DIR         where backups are written (default <home>/backups)
 #   CAPAUTH_BACKUP_RETAIN_DAYS prune backups older than N days (default 14)
 #   CAPAUTH_BACKUP_REMOTE      optional rsync target for off-box copy
 #                              (e.g. user@host:/srv/capauth-backups). Unset = local only.
@@ -52,7 +58,20 @@
 set -euo pipefail
 
 # ── Config ────────────────────────────────────────────────────────────────────
-CAPAUTH_HOME_DIR="${CAPAUTH_HOME:-$HOME/.capauth}"
+# Home resolution MUST match capauth.resolve_capauth_home(): explicit override,
+# then the modern ~/.skcapstone/capauth when it exists, then legacy ~/.capauth.
+# Defaulting straight to the legacy path meant that on a node using the modern
+# home this script exited 0 having backed up NOTHING, warning only that a
+# keystore was "not found" when it was simply somewhere else. A backup that
+# silently covers nothing is worse than none: doctor's backups_configured check
+# goes green on the empty directory it just made.
+if [[ -n "${CAPAUTH_HOME:-}" ]]; then
+    CAPAUTH_HOME_DIR="$CAPAUTH_HOME"
+elif [[ -d "$HOME/.skcapstone/capauth" ]]; then
+    CAPAUTH_HOME_DIR="$HOME/.skcapstone/capauth"
+else
+    CAPAUTH_HOME_DIR="$HOME/.capauth"
+fi
 DB_PATH="${CAPAUTH_DB_PATH:-$CAPAUTH_HOME_DIR/service/keys.db}"
 # Bunker pairing session store (persisted by the broker; see service/bunker.py).
 # CAPAUTH_BUNKER_STORE="" disables the leg, matching the service's own override.
@@ -190,6 +209,31 @@ backup_bunker() {
     BACKED_UP_ANY=1
 }
 
+# ── 2b. Identity PUBLIC key (public material only) ────────────────────────────
+# doctor's backup_restorable check compares the live identity/public.asc against
+# the copy in the newest backup: without it, restorability can be asserted but
+# never proven, since a keys.db alone says nothing about whether the identity
+# itself comes back. Public key material only; the private-half refusal below
+# is the invariant and is deliberately belt-and-braces.
+backup_identity_pubkey() {
+    local src="$CAPAUTH_HOME_DIR/identity/public.asc"
+    local dst="$DEST/public.asc"
+    [[ -f "$src" ]] || { log "identity public key: none at $src; skipping"; return 0; }
+    case "$(basename "$src")" in
+        private.asc|*.gpg|*.key) die "refusing to back up private key material: $src" ;;
+    esac
+    if grep -qi "PRIVATE KEY BLOCK" "$src" 2>/dev/null; then
+        die "refusing to back up $src: it contains a PRIVATE key block"
+    fi
+    log "identity public key: $src -> public.asc"
+    if [[ "$DRY_RUN" -eq 0 ]]; then
+        cp -p "$src" "$dst"
+        chmod 600 "$dst"
+        manifest "public.asc: source=$src sha256=$(sha "$dst")"
+    fi
+    BACKED_UP_ANY=1
+}
+
 # ── 3. Authentik Postgres (optional) ──────────────────────────────────────────
 backup_authentik_pg() {
     if [[ -z "$PG_HOST" || -z "$PG_DB" || -z "$PG_USER" ]]; then
@@ -248,6 +292,7 @@ rotate() {
 # ── Main ──────────────────────────────────────────────────────────────────────
 backup_keystore
 backup_bunker
+backup_identity_pubkey
 backup_authentik_pg
 
 if [[ "$BACKED_UP_ANY" -eq 0 ]]; then

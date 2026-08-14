@@ -302,3 +302,95 @@ def test_restore_include_pg_without_config_errors(scratch):
     assert (
         "pg_host" in (r.stdout + r.stderr).lower() or "configured" in (r.stdout + r.stderr).lower()
     )
+
+
+# ── home resolution + public-key coverage (noroc2027, 2026-08-14) ─────────────
+#
+# Two gaps found by running this script for real on a live node:
+#
+# 1. It defaulted CAPAUTH_HOME_DIR to the LEGACY ~/.capauth while the live home
+#    is ~/.skcapstone/capauth (which is what capauth.resolve_capauth_home()
+#    prefers). The run "succeeded" with rc=0 and backed up NOTHING, warning
+#    about a keystore that was simply somewhere else. A backup that silently
+#    covers nothing is worse than no backup: doctor's backups_configured check
+#    would have gone green on an empty directory.
+#
+# 2. `capauth doctor` asks for identity/public.asc inside the backup set so
+#    restorability can actually be proven (backup_restorable). The script never
+#    copied it. Public key material is safe to back up; the script's refusal to
+#    copy PRIVATE material is the invariant that matters and is untouched here.
+
+
+def _run_backup(env: dict) -> subprocess.CompletedProcess:
+    return subprocess.run(
+        ["bash", str(BACKUP_SH)], env=env, capture_output=True, text=True, timeout=120
+    )
+
+
+def test_default_home_prefers_the_skcapstone_home_over_legacy(tmp_path, monkeypatch):
+    """With both present, the modern home wins, matching resolve_capauth_home()."""
+    fake_home = tmp_path / "user"
+    modern = fake_home / ".skcapstone" / "capauth"
+    legacy = fake_home / ".capauth"
+    _make_keystore(modern / "service" / "keys.db")
+    (legacy / "service").mkdir(parents=True)  # exists but has no keystore
+
+    env = dict(os.environ)
+    env["HOME"] = str(fake_home)
+    env.pop("CAPAUTH_HOME", None)
+    env.pop("CAPAUTH_DB_PATH", None)
+    env.pop("CAPAUTH_BACKUP_DIR", None)
+
+    res = _run_backup(env)
+    assert res.returncode == 0, res.stderr
+    dirs = sorted((modern / "backups").glob("capauth-backup-*"))
+    assert dirs, f"nothing backed up under the modern home:\n{res.stdout}"
+    assert (dirs[-1] / "keys.db").exists()
+
+
+def test_legacy_home_is_still_used_when_it_is_the_only_one(tmp_path):
+    fake_home = tmp_path / "user"
+    legacy = fake_home / ".capauth"
+    _make_keystore(legacy / "service" / "keys.db")
+
+    env = dict(os.environ)
+    env["HOME"] = str(fake_home)
+    for k in ("CAPAUTH_HOME", "CAPAUTH_DB_PATH", "CAPAUTH_BACKUP_DIR"):
+        env.pop(k, None)
+
+    res = _run_backup(env)
+    assert res.returncode == 0, res.stderr
+    assert sorted((legacy / "backups").glob("capauth-backup-*")), res.stdout
+
+
+def test_the_identity_public_key_is_included_so_restore_is_provable(scratch):
+    """doctor's backup_restorable compares live public.asc against the backup."""
+    env, home, backups = scratch["env"], scratch["home"], scratch["backups"]
+    ident = home / "identity"
+    ident.mkdir(parents=True, exist_ok=True)
+    armor = "-----BEGIN PGP PUBLIC KEY BLOCK-----\npub\n-----END PGP PUBLIC KEY BLOCK-----\n"
+    (ident / "public.asc").write_text(armor, encoding="utf-8")
+
+    res = _run_backup(env)
+    assert res.returncode == 0, res.stderr
+    latest = sorted(backups.glob("capauth-backup-*"))[-1]
+    assert (latest / "public.asc").read_text(encoding="utf-8") == armor
+
+
+def test_private_key_material_is_never_backed_up(scratch):
+    """The invariant that must survive every change here."""
+    env, home, backups = scratch["env"], scratch["home"], scratch["backups"]
+    ident = home / "identity"
+    ident.mkdir(parents=True, exist_ok=True)
+    (ident / "public.asc").write_text("pub", encoding="utf-8")
+    (ident / "private.asc").write_text("SECRET-KEY-MATERIAL", encoding="utf-8")
+
+    res = _run_backup(env)
+    assert res.returncode == 0, res.stderr
+    latest = sorted(backups.glob("capauth-backup-*"))[-1]
+    assert not (latest / "private.asc").exists()
+    for f in latest.rglob("*"):
+        if f.is_file():
+            assert b"SECRET-KEY-MATERIAL" not in f.read_bytes(), (
+                f"private material leaked into {f}"
+            )

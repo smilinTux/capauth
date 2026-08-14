@@ -344,8 +344,11 @@ def test_sign_payload_does_not_force_an_empty_passphrase_first(monkeypatch, tmp_
     monkeypatch.setattr(tok, "_get_issuer_fingerprint", lambda _h: "DEADBEEF")
 
     payload = tok.TokenPayload(
-        token_id="t", token_type=tok.TokenType.CAPABILITY, issuer="DEADBEEF",
-        subject="probe@example.org", capabilities=["x"],
+        token_id="t",
+        token_type=tok.TokenType.CAPABILITY,
+        issuer="DEADBEEF",
+        subject="probe@example.org",
+        capabilities=["x"],
     )
     sig = tok._pgp_sign_payload(payload, tmp_path)
 
@@ -380,8 +383,11 @@ def test_sign_payload_falls_back_to_loopback_when_the_agent_path_fails(monkeypat
     monkeypatch.setattr(tok, "_get_issuer_fingerprint", lambda _h: "DEADBEEF")
 
     payload = tok.TokenPayload(
-        token_id="t", token_type=tok.TokenType.CAPABILITY, issuer="DEADBEEF",
-        subject="probe@example.org", capabilities=["x"],
+        token_id="t",
+        token_type=tok.TokenType.CAPABILITY,
+        issuer="DEADBEEF",
+        subject="probe@example.org",
+        capabilities=["x"],
     )
     sig = tok._pgp_sign_payload(payload, tmp_path)
 
@@ -404,7 +410,10 @@ def test_sign_payload_returns_none_when_every_attempt_fails(monkeypatch, tmp_pat
     monkeypatch.setattr(tok, "_get_issuer_fingerprint", lambda _h: "DEADBEEF")
 
     payload = tok.TokenPayload(
-        token_id="t", token_type=tok.TokenType.CAPABILITY, issuer="DEADBEEF",
-        subject="probe@example.org", capabilities=["x"],
+        token_id="t",
+        token_type=tok.TokenType.CAPABILITY,
+        issuer="DEADBEEF",
+        subject="probe@example.org",
+        capabilities=["x"],
     )
     assert tok._pgp_sign_payload(payload, tmp_path) is None

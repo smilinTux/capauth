@@ -149,6 +149,13 @@ jobs:
 
   pypi-publish:
     needs: build
+    # A job skip propagates THROUGH the graph, not one level. `tag` is skipped
+    # on the tag-push path, `build` survives it with always(), but a bare
+    # `needs: build` here still evaluates to skipped. With a tags-only trigger
+    # `tag` can never run, so this job could never run either and a tagged
+    # release would build cleanly and publish nothing (skcoord #6).
+    if: >-
+      always() && !cancelled() && needs.build.result == 'success'
     runs-on: ubuntu-latest
     environment: pypi
     permissions:

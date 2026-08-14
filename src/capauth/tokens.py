@@ -642,32 +642,48 @@ def _pgp_sign_payload(payload: TokenPayload, home: Path) -> Optional[str]:
 
     issuer_fp = _get_issuer_fingerprint(home)
     payload_json = payload.model_dump_json()
-    try:
-        cmd = [
-            "gpg",
-            "--batch",
-            "--yes",
-            "--armor",
-            "--detach-sign",
-            "--local-user",
-            issuer_fp,
-            "--passphrase",
-            "",
-            "--pinentry-mode",
-            "loopback",
-        ]
-        result = subprocess.run(
-            cmd,
-            input=payload_json,
-            capture_output=True,
-            text=True,
-            timeout=15,
-        )
-        if result.returncode == 0:
-            return result.stdout
-        logger.warning("GPG signing failed: %s", result.stderr.strip())
-    except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as exc:
-        logger.warning("GPG signing error: %s", exc)
+
+    # Attempt order matters. The plain invocation lets gpg-agent mediate, which
+    # is what actually works for a normal key. The loopback+empty-passphrase
+    # form is kept ONLY as a fallback for a genuinely passphrase-less key in an
+    # environment with no usable agent (CI containers, cold bootstrap).
+    #
+    # It used to be the ONLY form, and that silently broke signing everywhere:
+    # forcing `--passphrase "" --pinentry-mode loopback` makes gpg refuse an
+    # agent-managed key with "No passphrase given" instead of consulting the
+    # agent. Every token this fleet ever issued came out unsigned as a result,
+    # regardless of which key was configured, and nothing noticed because
+    # issue_token treats a signing failure as a warning and stores the token
+    # anyway. Verified 2026-08-14: same key, same payload, plain form rc=0,
+    # loopback form rc=2.
+    base = [
+        "gpg",
+        "--batch",
+        "--yes",
+        "--armor",
+        "--detach-sign",
+        "--local-user",
+        issuer_fp,
+    ]
+    attempts = [base, base + ["--passphrase", "", "--pinentry-mode", "loopback"]]
+
+    last_err = ""
+    for cmd in attempts:
+        try:
+            result = subprocess.run(
+                cmd,
+                input=payload_json,
+                capture_output=True,
+                text=True,
+                timeout=15,
+            )
+            if result.returncode == 0 and result.stdout.strip():
+                return result.stdout
+            last_err = result.stderr.strip()
+        except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as exc:
+            last_err = str(exc)
+
+    logger.warning("GPG signing failed for %s: %s", issuer_fp, last_err)
     return None
 
 

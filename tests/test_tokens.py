@@ -311,3 +311,100 @@ class TestTokenListAndExport:
         """Non-token JSON should raise ValueError."""
         with pytest.raises(ValueError):
             import_token('{"foo": "bar"}')
+
+
+# ── signing invocation (regression: tokens were silently never signed) ────
+
+
+def test_sign_payload_does_not_force_an_empty_passphrase_first(monkeypatch, tmp_path):
+    """The FIRST gpg attempt must let gpg-agent mediate.
+
+    Forcing ``--passphrase "" --pinentry-mode loopback`` makes gpg refuse an
+    agent-managed key with "No passphrase given" rather than consulting the
+    agent. That was the only invocation for a long time, so every token this
+    fleet issued came out unsigned regardless of which key was configured, and
+    nothing noticed because issue_token downgrades a signing failure to a
+    warning and stores the token anyway.
+    """
+    from capauth import tokens as tok
+
+    calls = []
+
+    class _Result:
+        returncode = 0
+        stdout = "-----BEGIN PGP SIGNATURE-----\nx\n-----END PGP SIGNATURE-----\n"
+        stderr = ""
+
+    def fake_run(cmd, **kwargs):
+        calls.append(cmd)
+        return _Result()
+
+    monkeypatch.setattr(tok.shutil, "which", lambda _n: "/usr/bin/gpg")
+    monkeypatch.setattr(tok.subprocess, "run", fake_run)
+    monkeypatch.setattr(tok, "_get_issuer_fingerprint", lambda _h: "DEADBEEF")
+
+    payload = tok.TokenPayload(
+        token_id="t", token_type=tok.TokenType.CAPABILITY, issuer="DEADBEEF",
+        subject="probe@example.org", capabilities=["x"],
+    )
+    sig = tok._pgp_sign_payload(payload, tmp_path)
+
+    assert sig is not None
+    assert len(calls) == 1, "a working first attempt must not fall through"
+    assert "--passphrase" not in calls[0]
+    assert "loopback" not in calls[0]
+
+
+def test_sign_payload_falls_back_to_loopback_when_the_agent_path_fails(monkeypatch, tmp_path):
+    """A passphrase-less key with no usable agent (CI, cold bootstrap) still signs."""
+    from capauth import tokens as tok
+
+    calls = []
+
+    class _Fail:
+        returncode = 2
+        stdout = ""
+        stderr = "gpg: signing failed: No pinentry"
+
+    class _Ok:
+        returncode = 0
+        stdout = "-----BEGIN PGP SIGNATURE-----\ny\n-----END PGP SIGNATURE-----\n"
+        stderr = ""
+
+    def fake_run(cmd, **kwargs):
+        calls.append(cmd)
+        return _Fail() if len(calls) == 1 else _Ok()
+
+    monkeypatch.setattr(tok.shutil, "which", lambda _n: "/usr/bin/gpg")
+    monkeypatch.setattr(tok.subprocess, "run", fake_run)
+    monkeypatch.setattr(tok, "_get_issuer_fingerprint", lambda _h: "DEADBEEF")
+
+    payload = tok.TokenPayload(
+        token_id="t", token_type=tok.TokenType.CAPABILITY, issuer="DEADBEEF",
+        subject="probe@example.org", capabilities=["x"],
+    )
+    sig = tok._pgp_sign_payload(payload, tmp_path)
+
+    assert sig is not None
+    assert len(calls) == 2
+    assert "loopback" in calls[1]
+
+
+def test_sign_payload_returns_none_when_every_attempt_fails(monkeypatch, tmp_path):
+    """Signing failure must stay non-fatal, but must not invent a signature."""
+    from capauth import tokens as tok
+
+    class _Fail:
+        returncode = 2
+        stdout = ""
+        stderr = "gpg: signing failed: No secret key"
+
+    monkeypatch.setattr(tok.shutil, "which", lambda _n: "/usr/bin/gpg")
+    monkeypatch.setattr(tok.subprocess, "run", lambda cmd, **kw: _Fail())
+    monkeypatch.setattr(tok, "_get_issuer_fingerprint", lambda _h: "DEADBEEF")
+
+    payload = tok.TokenPayload(
+        token_id="t", token_type=tok.TokenType.CAPABILITY, issuer="DEADBEEF",
+        subject="probe@example.org", capabilities=["x"],
+    )
+    assert tok._pgp_sign_payload(payload, tmp_path) is None

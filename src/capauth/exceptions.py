@@ -52,6 +52,17 @@ class KeyExpiredError(VerificationError):
     """
 
 
+class SubjectNamingError(CapAuthError):
+    """Raised when a subject string fails canonical fqid normalization.
+
+    Raised by :func:`capauth.subject.canonical_subject` for non-ASCII input,
+    a trailing dot or empty label, or a string that does not match the fqid
+    grammar (IDENTITY_NAMING_STANDARD.md) even after alias translation. This
+    is a naming-format defect, distinct from :class:`VerificationError`
+    (which signals a cryptographic proof failed).
+    """
+
+
 class ProfileError(CapAuthError):
     """Raised for sovereign profile creation or loading issues."""
 

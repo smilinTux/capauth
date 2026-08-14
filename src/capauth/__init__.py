@@ -18,6 +18,7 @@ from .authz import (
     Obligation,
     decide,
 )
+from .exceptions import SubjectNamingError
 from .manifest import (
     DEFAULT_SIG_SUFFIX,
     ManifestSigningError,
@@ -42,6 +43,7 @@ from .pairing import (
     revoke,
 )
 from .provisioning import SKCHAT_SCOPES, provision_subject
+from .subject import ORG_DOMAIN, canonical_subject
 from .tokens import (
     AUDIENCE_SCOPES,
     Capability,
@@ -115,6 +117,10 @@ __all__ = [
     # provisioning (subject enrollment + the skchat scope set)
     "SKCHAT_SCOPES",
     "provision_subject",
+    # subject naming (Identity Naming Standard: the one canonical fqid form)
+    "canonical_subject",
+    "ORG_DOMAIN",
+    "SubjectNamingError",
     # tokens (kernel track M1: moved verbatim from skcapstone)
     "Capability",
     "SignedToken",

@@ -151,9 +151,7 @@ def test_verified_change_capability_requires_verified(tmp_path, capability):
 
 
 @pytest.mark.parametrize("capability", VERIFIED_CAPABILITIES)
-def test_verified_change_capability_denied_below_verified_even_with_token(
-    tmp_path, capability
-):
+def test_verified_change_capability_denied_below_verified_even_with_token(tmp_path, capability):
     # A tofu device requesting a verified change.* capability is denied no
     # matter the token (e.g. this is the fix for a free-text CAB vote:
     # tofu/attested identities can never cast a vote that counts).

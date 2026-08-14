@@ -36,6 +36,18 @@ subject plus the request:
    principal who can write a file into it could mint itself any capability. The
    trust anchor is the verifier's local gpg keyring (``~/.gnupg``), which is
    outside the replicated store.
+
+   Two failure shapes here are kept apart on purpose, because they are
+   different operator problems: a token that was **never signed** at all
+   (``is unsigned: no signature is present``) versus a token that carries a
+   signature which **does not verify** against its declared issuer
+   (``carries a signature that does not verify...``, covering tamper, wrong
+   signer, or an unreachable key). A genuinely unsigned token MAY be granted
+   for a bounded window under an explicit, logged, time-boxed operator flag,
+   ``CAPAUTH_LEGACY_UNSIGNED_GRACE_UNTIL`` (an ISO-8601 UTC deadline); a token
+   with a signature that fails verification is NEVER graced, regardless of
+   that flag, because it may be tampered rather than merely legacy. See
+   :func:`_legacy_unsigned_grace_deadline`.
 4. The **requested capability** and **resource**.
 
 This kernel does NOT decide whether an issuer is *authorized* to grant a given
@@ -56,8 +68,20 @@ expired / revoked token, an unsigned token or one whose signature does not
 verify, an insufficient enrollment mode, and an unknown capability all return
 ``allow=False`` with a clear ``reason``. Unreachable key material is an
 uncertainty like any other: if the issuer's key is absent from the keyring, or
-gpg is unavailable, the signature cannot be established and the request is
-DENIED rather than waved through.
+gpg is unavailable, the signature cannot be established (``signature_verifies``
+returns ``False``) and the request is DENIED rather than waved through, with the
+same "does not verify" reason as a tampered signature (this kernel cannot tell
+"the key is missing" apart from "the signature is bad" -- both are "cannot be
+established" -- but it CAN and does tell either of those apart from "no
+signature was ever attached").
+
+The one deliberate, narrow exception is
+``CAPAUTH_LEGACY_UNSIGNED_GRACE_UNTIL``: unconfigured (the default), malformed,
+or expired all mean deny, exactly like every other uncertainty. Only an
+explicit, well-formed, still-future ISO-8601 deadline in that env var allows a
+token with NO signature at all through, and every such grant is logged at
+WARNING and says so in its own ``reason`` string. It never applies to a token
+that carries a signature which fails to verify.
 
 Obligations
 -----------
@@ -75,6 +99,8 @@ real ``~/.skcapstone`` registry.
 
 from __future__ import annotations
 
+import logging
+import os
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
@@ -90,8 +116,15 @@ from .pairing import (
 )
 from .tokens import Capability, SignedToken, is_revoked, list_tokens, signature_verifies
 
+logger = logging.getLogger("capauth.authz")
+
 #: Obligation kind for the audit record every decision emits.
 OBLIGATION_AUDIT = "audit"
+
+#: Env var naming an explicit, time-boxed grace window for genuinely unsigned
+#: (never-attempted) tokens. See :func:`_legacy_unsigned_grace_deadline`.
+#: Unconfigured, unparseable, or expired all mean the same thing: deny.
+LEGACY_UNSIGNED_GRACE_ENV = "CAPAUTH_LEGACY_UNSIGNED_GRACE_UNTIL"
 
 
 # --------------------------------------------------------------------------- #
@@ -419,6 +452,58 @@ def _now() -> datetime:
     return datetime.now(timezone.utc)
 
 
+def _legacy_unsigned_grace_deadline() -> tuple[Optional[datetime], Optional[str]]:
+    """The still-future deadline of an explicit legacy-unsigned-token grace, if any.
+
+    Reads :data:`LEGACY_UNSIGNED_GRACE_ENV`
+    (``CAPAUTH_LEGACY_UNSIGNED_GRACE_UNTIL``), an operator-set ISO-8601
+    timestamp marking when tolerance for genuinely unsigned tokens (never
+    signed at all, as opposed to signed-but-invalid) expires. This exists
+    because signature verification landed on a fleet where other nodes
+    (Syncthing peers not yet updated, or holding tokens issued by a since-
+    retired key) may still carry unsigned tokens; a bare hard flip with no
+    migration window could lock every one of those nodes out the moment they
+    pull this code. The flag is the deliberate, bounded alternative to that.
+
+    Fails closed on every ambiguity, matching the rest of this module:
+
+    * unset or blank -> no grace (``(None, raw)``);
+    * not a valid ISO-8601 timestamp -> logged and ignored, no grace;
+    * a valid timestamp that has already passed -> no grace (the window is
+      over; the flag is not re-armed by leaving a stale value in place).
+
+    A naive (timezone-less) timestamp is treated as UTC, since that is what
+    every other timestamp in this module already is.
+
+    Returns:
+        A ``(deadline, raw)`` pair. ``deadline`` is the parsed, timezone-aware
+        UTC cutoff, or ``None`` when there is no live grace window. ``raw`` is
+        the unparsed env value (or ``None``), kept only so callers can include
+        it in a log line or reason string.
+    """
+    raw = os.environ.get(LEGACY_UNSIGNED_GRACE_ENV)
+    if raw is None or not raw.strip():
+        return None, raw
+
+    try:
+        deadline = datetime.fromisoformat(raw.strip())
+    except ValueError:
+        logger.warning(
+            "%s=%r is not a valid ISO-8601 timestamp; ignoring it (unsigned tokens still deny)",
+            LEGACY_UNSIGNED_GRACE_ENV,
+            raw,
+        )
+        return None, raw
+
+    if deadline.tzinfo is None:
+        deadline = deadline.replace(tzinfo=timezone.utc)
+
+    if _now() >= deadline:
+        return None, raw
+
+    return deadline, raw
+
+
 def _audit_obligation(
     *,
     subject: str,
@@ -523,6 +608,17 @@ def decide(
     including key material that cannot be reached to verify a signature. Emits
     an AUDIT obligation on every decision.
 
+    A granting token must ALSO carry a signature that verifies (see the module
+    docstring, fact 3). Two denial shapes are reported with distinct reasons: a
+    token that was never signed denies with ``"... is unsigned: no signature is
+    present"``; a token that carries a signature which fails to verify (tamper,
+    wrong signer, unreachable key, unattributable issuer) denies with ``"...
+    carries a signature that does not verify against its declared issuer"``.
+    An unsigned token MAY be granted instead, under an explicit, logged,
+    time-boxed legacy exception: see ``CAPAUTH_LEGACY_UNSIGNED_GRACE_UNTIL`` /
+    :func:`_legacy_unsigned_grace_deadline`. That exception never applies to a
+    signature that was attempted and failed to verify.
+
     Args:
         subject: The already-authenticated subject identity (e.g. an fqid).
         capability: The requested capability (e.g. ``"skchat.send"``).
@@ -607,19 +703,71 @@ def decide(
     # SOMETHING wrote a file. The store is Syncthing-replicated, so "can write
     # into the store" is a far wider set of principals than one box, and until
     # this gate existed a plain unsigned JSON file granted whatever capabilities
-    # it named -- including the skcode RCE pair. A token whose signature is
-    # absent, malformed, made over different bytes, or made by a key other than
-    # the issuer it names is treated as if it were not there at all.
-    signed = [t for t in usable if signature_verifies(t)]
-    if not signed:
+    # it named -- including the skcode RCE pair.
+    #
+    # Two failure shapes are kept apart deliberately (see the module
+    # docstring): a token that never carried a signature at all, versus a
+    # token that carries one that does not verify (tamper, wrong signer,
+    # unreachable key, unattributable issuer). They are different operator
+    # problems and get different deny reasons. When a capability's candidate
+    # tokens include both shapes, the invalid-signature reason wins: an
+    # attempted-and-failed signature is the more urgent case to surface, since
+    # it may be tampering rather than merely an unmigrated token.
+    verified = [t for t in usable if signature_verifies(t)]
+    if not verified:
+        unsigned = [t for t in usable if not (t.signature and t.signature.strip())]
+        invalid = [t for t in usable if t.signature and t.signature.strip()]
+
+        if invalid:
+            return _deny(
+                subject,
+                capability,
+                resource,
+                (
+                    f"token granting {rule.required_capability!r} carries a signature "
+                    f"that does not verify against its declared issuer"
+                ),
+                context,
+            )
+
+        # Every candidate token is genuinely unsigned. Fail closed UNLESS an
+        # explicit, well-formed, still-future grace deadline is configured.
+        # Unconfigured (the default), malformed, or expired all deny, same as
+        # every other uncertainty in this function.
+        deadline, raw_deadline = _legacy_unsigned_grace_deadline()
+        if deadline is not None:
+            granted_all = any(
+                t.payload.has_capability(Capability.ALL.value)
+                and Capability.ALL.value in t.payload.capabilities
+                for t in unsigned
+            )
+            logger.warning(
+                "LEGACY GRACE: granting %r to %r on an UNSIGNED token under %s=%s "
+                "(expires %s); this token must be re-issued signed before then",
+                capability,
+                subject,
+                LEGACY_UNSIGNED_GRACE_ENV,
+                raw_deadline,
+                deadline.isoformat(),
+            )
+            reason = (
+                f"granted under LEGACY GRACE ({LEGACY_UNSIGNED_GRACE_ENV}={raw_deadline}, "
+                f"expires {deadline.isoformat()}): subject enrolled {mode.value} "
+                f"(>= {rule.minimum_mode.value}) with an active but UNSIGNED "
+                + (
+                    "Capability.ALL token"
+                    if granted_all
+                    else f"token granting {rule.required_capability}"
+                )
+                + " -- this token must be re-issued signed before the grace expires"
+            )
+            return _allow(subject, capability, resource, reason, context)
+
         return _deny(
             subject,
             capability,
             resource,
-            (
-                f"token granting {rule.required_capability!r} is unsigned or its "
-                f"signature does not verify against its declared issuer"
-            ),
+            f"token granting {rule.required_capability!r} is unsigned: no signature is present",
             context,
         )
 
@@ -632,7 +780,7 @@ def decide(
     granted_all = any(
         t.payload.has_capability(Capability.ALL.value)
         and Capability.ALL.value in t.payload.capabilities
-        for t in signed
+        for t in verified
     )
     reason = (
         f"granted: subject enrolled {mode.value} (>= {rule.minimum_mode.value}) with an active "

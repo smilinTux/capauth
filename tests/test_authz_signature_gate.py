@@ -186,7 +186,12 @@ def test_unsigned_token_does_not_grant_rce_capability(tmp_path, capability):
     decision = decide(SUBJECT, capability, base_dir=home)
 
     assert decision.allow is False
-    assert "unsigned" in decision.reason
+    # The unsigned reason, and specifically NOT the invalid-signature reason:
+    # those are different operator problems (see
+    # test_unsigned_reason_and_invalid_reason_are_distinct below) and this is
+    # the "never signed at all" case.
+    assert "is unsigned" in decision.reason
+    assert "does not verify" not in decision.reason
     # And the deny is still audited, like every other branch.
     assert [o for o in decision.obligations if o.kind == "audit"]
 
@@ -227,7 +232,10 @@ def test_token_with_unattributable_issuer_does_not_grant(tmp_path, signing_key):
 
     decision = decide(SUBJECT, "skcode.dispatch", base_dir=home)
     assert decision.allow is False
-    assert "signature does not verify" in decision.reason
+    # Signed, but the signature is invalid -- NOT the "unsigned" bucket, even
+    # though the token failed for a reason rooted in the issuer field.
+    assert "does not verify" in decision.reason
+    assert "is unsigned" not in decision.reason
 
 
 # --------------------------------------------------------------------------- #
@@ -248,7 +256,13 @@ def test_corrupted_signature_does_not_grant(tmp_path, signing_key):
     )
 
     for capability in ALL_CAPABILITIES:
-        assert decide(SUBJECT, capability, base_dir=home).allow is False
+        decision = decide(SUBJECT, capability, base_dir=home)
+        assert decision.allow is False, capability
+        # A mangled-but-present signature is "invalid", never "unsigned": the
+        # operator needs to know a signature WAS there and failed, which reads
+        # very differently from "nobody ever signed this".
+        assert "does not verify" in decision.reason
+        assert "is unsigned" not in decision.reason
 
 
 def test_signature_over_different_bytes_does_not_grant(tmp_path, signing_key):
@@ -273,7 +287,8 @@ def test_signature_over_different_bytes_does_not_grant(tmp_path, signing_key):
     for capability in ALL_CAPABILITIES:
         decision = decide(SUBJECT, capability, base_dir=home)
         assert decision.allow is False, capability
-        assert "signature does not verify" in decision.reason
+        assert "does not verify" in decision.reason
+        assert "is unsigned" not in decision.reason
 
 
 def test_signature_by_a_different_key_than_the_declared_issuer_does_not_grant(
@@ -300,7 +315,8 @@ def test_signature_by_a_different_key_than_the_declared_issuer_does_not_grant(
 
     decision = decide(SUBJECT, "skcode.dispatch", base_dir=home)
     assert decision.allow is False
-    assert "signature does not verify" in decision.reason
+    assert "does not verify" in decision.reason
+    assert "is unsigned" not in decision.reason
 
 
 def test_unreachable_key_material_denies(tmp_path, signing_key, monkeypatch):
@@ -308,7 +324,9 @@ def test_unreachable_key_material_denies(tmp_path, signing_key, monkeypatch):
 
     Same token, same valid signature, evaluated on a node whose keyring does not
     hold the issuer's public key. The signature fact cannot be established, so
-    the request is DENIED rather than waved through.
+    the request is DENIED rather than waved through. This is the "invalid"
+    bucket, not "unsigned": the token DOES carry a signature, it just cannot be
+    checked here, and that must never be reported as if nothing were signed.
     """
     _, fingerprint = signing_key
     home = _make_home(tmp_path, fingerprint)
@@ -324,7 +342,10 @@ def test_unreachable_key_material_denies(tmp_path, signing_key, monkeypatch):
         monkeypatch.setenv("GNUPGHOME", str(empty_keyring))
         assert signature_verifies(token) is False
         for capability in ALL_CAPABILITIES:
-            assert decide(SUBJECT, capability, base_dir=home).allow is False
+            decision = decide(SUBJECT, capability, base_dir=home)
+            assert decision.allow is False
+            assert "does not verify" in decision.reason
+            assert "is unsigned" not in decision.reason
     finally:
         subprocess.run(
             ["gpgconf", "--homedir", str(empty_keyring), "--kill", "gpg-agent"],

@@ -123,10 +123,9 @@ def good_paths(tmp_path: Path, good_key: pgpy.PGPKey) -> CustodyPaths:
     pub = _write(identity / "public.asc", public_armor)
     priv = _write(identity / "private.asc", str(good_key), mode=0o600)
     profile = _write(identity / "profile.json", '{"entity": "carol"}')
-    rev = _write(
-        identity / "root-revocation.asc",
-        "-----BEGIN PGP PUBLIC KEY BLOCK-----\nrevocation\n-----END PGP PUBLIC KEY BLOCK-----\n",
-    )
+    # A REAL revocation certificate for this very key. A placeholder here would
+    # mean the "healthy home" fixture is only healthy by the check's laxity.
+    rev = _write(identity / "root-revocation.asc", _revoked_public_armor(good_key))
 
     keystore = home / "service" / "keys.db"
     _make_good_keystore(keystore)
@@ -271,7 +270,7 @@ class TestKeyStatus:
 
 class TestRevocationCert:
     def test_present_ok(self, good_paths):
-        r = check_revocation_cert(good_paths.revocation_cert)
+        r = check_revocation_cert(good_paths.revocation_cert, good_paths.public_key)
         assert r.status is Status.OK
 
     def test_missing_fails(self, good_paths):
@@ -481,3 +480,61 @@ def test_a_mismatched_keypair_fails_the_whole_suite(good_paths):
     results = run_custody_checks(paths=good_paths)
     assert overall_status(results) is Status.FAIL
     assert exit_code(results) == 1
+
+
+# ── revocation cert VALIDITY, not just presence (2026-08-14) ─────────────────
+#
+# check_revocation_cert tested only that a file exists and starts with
+# "BEGIN PGP". Any armored block passed: a public key, a signature, an
+# encrypted message, a copy of the wrong key's cert. So the one check standing
+# between "we can repudiate this key" and "we cannot" could be satisfied by a
+# placeholder, and would then report OK forever while protecting nothing.
+#
+# That is the same fake-green shape as a self-skipping gate. The cert now has
+# to actually carry a key-revocation signature FOR THIS key.
+
+
+def test_revocation_cert_ok_for_a_real_cert_of_the_right_key(good_paths, good_key):
+    good_paths.revocation_cert.write_text(_revoked_public_armor(good_key), encoding="utf-8")
+    result = check_revocation_cert(good_paths.revocation_cert, good_paths.public_key)
+    assert result.status is Status.OK
+
+
+def test_revocation_cert_rejects_an_armored_block_that_revokes_nothing(good_paths):
+    """The placeholder case: right shape, no revocation in it.
+
+    Uses a FRESH key deliberately: the good_paths fixture revokes good_key to
+    build its (real) certificate, and pgpy attaches that signature to the key
+    object, so reusing it here would write an already-revoked block and the
+    test would pass without proving anything.
+    """
+    pristine = _new_ed25519_key("Pristine", "pristine@test.io")
+    good_paths.revocation_cert.write_text(str(pristine.pubkey), encoding="utf-8")
+    result = check_revocation_cert(good_paths.revocation_cert, good_paths.public_key)
+    assert result.status is Status.FAIL
+    assert "no key-revocation signature" in result.detail.lower()
+
+
+def test_revocation_cert_rejects_a_cert_for_a_DIFFERENT_key(good_paths):
+    """A valid cert for the wrong key repudiates nothing that matters here."""
+    stranger = _new_ed25519_key("Someone Else", "else@test.io")
+    good_paths.revocation_cert.write_text(_revoked_public_armor(stranger), encoding="utf-8")
+    result = check_revocation_cert(good_paths.revocation_cert, good_paths.public_key)
+    assert result.status is Status.FAIL
+    assert str(stranger.fingerprint).replace(" ", "") in result.detail
+
+
+def test_revocation_cert_still_fails_when_absent(good_paths):
+    good_paths.revocation_cert.unlink()
+    result = check_revocation_cert(good_paths.revocation_cert, good_paths.public_key)
+    assert result.status is Status.FAIL
+    assert "no revocation certificate" in result.detail.lower()
+
+
+def test_revocation_cert_warns_rather_than_fails_when_it_cannot_be_parsed(good_paths):
+    """Unparseable is not the same as absent, and must not read as 'fine'."""
+    good_paths.revocation_cert.write_text(
+        "-----BEGIN PGP PUBLIC KEY BLOCK-----\nnot really armor\n", encoding="utf-8"
+    )
+    result = check_revocation_cert(good_paths.revocation_cert, good_paths.public_key)
+    assert result.status is Status.WARN

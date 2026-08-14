@@ -404,7 +404,37 @@ def check_key_status(public_key: Path) -> CheckResult:
     )
 
 
-def check_revocation_cert(revocation_cert: Path) -> CheckResult:
+def _revocation_fingerprints(cert_path: Path) -> tuple[bool, set[str]] | None:
+    """``(has_revocation_sig, fingerprints)`` for a cert, or None if unparseable.
+
+    Reads only public material: the key packet's fingerprint and the SIGNATURE
+    TYPES present. No secret bytes are touched and nothing is imported into a
+    keyring, so inspecting a cert can never accidentally arm it.
+    """
+    try:
+        import pgpy
+        from pgpy.constants import SignatureType
+
+        key, _ = pgpy.PGPKey.from_file(str(cert_path))
+    except Exception:
+        return None
+
+    fprs = {str(key.fingerprint).replace(" ", "")}
+    has_rev = False
+    try:
+        for sig in key.__sig__:
+            if sig.type in (SignatureType.KeyRevocation, SignatureType.SubkeyRevocation):
+                has_rev = True
+        for uid in key.userids:
+            for sig in uid.__sig__:
+                if sig.type == SignatureType.CertRevocation:
+                    has_rev = True
+    except Exception:
+        return None
+    return has_rev, fprs
+
+
+def check_revocation_cert(revocation_cert: Path, public_key: Path | None = None) -> CheckResult:
     """A root revocation certificate exists at the documented path.
 
     Without a pre-generated revocation cert, a compromised/lost key cannot be
@@ -437,11 +467,46 @@ def check_revocation_cert(revocation_cert: Path) -> CheckResult:
             "confirm this is a real revocation certificate.",
         )
     size = revocation_cert.stat().st_size
-    return CheckResult(
-        "revocation_cert",
-        Status.OK,
+    detail = (
         f"revocation certificate present ({revocation_cert}, {size} bytes, "
-        f"mtime {_mtime_iso(revocation_cert)})",
+        f"mtime {_mtime_iso(revocation_cert)})"
+    )
+
+    # Presence is not protection. A file that merely LOOKS armored satisfies a
+    # presence check while repudiating nothing, so the cert must actually carry
+    # a key-revocation signature, and for THIS key.
+    parsed = _revocation_fingerprints(revocation_cert)
+    if parsed is None:
+        return CheckResult(
+            "revocation_cert",
+            Status.WARN,
+            f"{detail}, but it could not be parsed as a PGP key "
+            "(PGPy unavailable, or the armor is malformed)",
+            "verify the certificate in a throwaway GNUPGHOME; an unparseable "
+            "cert cannot be relied on to revoke anything.",
+        )
+    has_rev, fprs = parsed
+    if not has_rev:
+        return CheckResult(
+            "revocation_cert",
+            Status.FAIL,
+            f"{detail}, but it carries no key-revocation signature: it repudiates nothing",
+            "regenerate it with 'gpg --gen-revoke <fpr>' and verify it flips a "
+            "throwaway keyring's validity field to 'r' before trusting it.",
+        )
+    if public_key is not None and public_key.exists():
+        live_fpr, _ = _load_public_fingerprint(public_key)
+        if live_fpr and live_fpr.upper() not in {f.upper() for f in fprs}:
+            return CheckResult(
+                "revocation_cert",
+                Status.FAIL,
+                f"{detail}, but it revokes {', '.join(sorted(fprs))}, not this "
+                f"identity's key {live_fpr}",
+                "a revocation certificate for a different key protects nothing "
+                "here; generate one for the live identity key.",
+            )
+    return CheckResult(
+        "revocation_cert", Status.OK, f"{detail}, carries a key-revocation signature"
     )
 
 
@@ -648,7 +713,7 @@ def run_custody_checks(
         check_keypair_match(p.private_key, p.public_key),
         check_private_key_permissions(p.private_key),
         check_key_status(p.public_key),
-        check_revocation_cert(p.revocation_cert),
+        check_revocation_cert(p.revocation_cert, p.public_key),
         check_keystore_integrity(p.keystore),
         check_backups_configured(p.backup_root, max_backup_age_days),
         check_backup_restorable(p.public_key, p.backup_root),

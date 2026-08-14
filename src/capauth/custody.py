@@ -31,6 +31,7 @@ are, by definition, public.
 
 from __future__ import annotations
 
+import json
 import os
 import shutil
 import sqlite3
@@ -190,6 +191,63 @@ def _load_public_fingerprint(public_key_path: Path):
         return None, None
 
 
+CUSTODY_DECLARATION_FILENAME = "custody.json"
+
+# Values that mean "this material is deliberately not on this machine".
+_OFFLINE_VALUES = frozenset({"offline", "offline-custody", "external"})
+
+
+def load_custody_declaration(identity_dir: Path) -> dict:
+    """Read ``identity/custody.json``: an explicit statement of what is held
+    OFF this machine on purpose.
+
+    A private key that is absent because it lives in offline custody (the
+    documented design for a root/operator key: see
+    ``COLD_MACHINE_BOOTSTRAP_AND_DR.md`` Step 1) is indistinguishable on disk
+    from one that is absent because something ate it. Without a way to say
+    which, doctor reports FAIL forever on a correctly configured node, and a
+    permanently-red gate stops being read, which is how the failures it was
+    meant to catch get through.
+
+    So the operator DECLARES it. This is not a softening:
+
+    * silence still fails, because no file means no declaration;
+    * a declaration must carry ``declared_by``, so a pass is attributable
+      rather than anonymous;
+    * an unparseable declaration is ignored, never trusted;
+    * a declaration never excuses material that is actually present, and never
+      excuses a mismatched keypair.
+
+    Returns:
+        dict: the parsed declaration, or ``{}`` when absent/invalid.
+    """
+    path = Path(identity_dir) / CUSTODY_DECLARATION_FILENAME
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    if not isinstance(data, dict):
+        return {}
+    if not str(data.get("declared_by") or "").strip():
+        # An assertion with nobody's name on it is not an attestation.
+        return {}
+    return data
+
+
+def _declared_offline(custody: Optional[dict], field: str = "private_key") -> Optional[str]:
+    """The attribution string when ``field`` is declared offline, else None."""
+    if not custody:
+        return None
+    if str(custody.get(field) or "").strip().lower() not in _OFFLINE_VALUES:
+        return None
+    who = str(custody.get("declared_by") or "").strip()
+    when = str(custody.get("declared_at") or "").strip()
+    stamp = f"declared offline by {who}"
+    if when:
+        stamp += f" on {when}"
+    return stamp
+
+
 # ── individual checks ─────────────────────────────────────────────────────────
 
 
@@ -198,6 +256,7 @@ def check_identity_present(
     public_key: Path,
     profile: Path,
     expected_fingerprint: Optional[str] = None,
+    custody: Optional[dict] = None,
 ) -> CheckResult:
     """The identity key material exists where it is expected."""
     missing = [
@@ -210,6 +269,16 @@ def check_identity_present(
         if not p.exists()
     ]
     if private_key.exists() is False:
+        offline = _declared_offline(custody)
+        if offline and missing == ["private.asc"]:
+            fpr, _ = _load_public_fingerprint(public_key)
+            label = f"fingerprint={fpr}" if fpr else "fingerprint=unreadable"
+            return CheckResult(
+                "identity_present",
+                Status.OK,
+                f"identity material present at {private_key.parent} ({label}); "
+                f"private key held OFFLINE, {offline}",
+            )
         return CheckResult(
             "identity_present",
             Status.FAIL,
@@ -262,7 +331,9 @@ def _key_summary(path: Path) -> tuple[Optional[str], str]:
         return None, "?"
 
 
-def check_keypair_match(private_key: Path, public_key: Path) -> CheckResult:
+def check_keypair_match(
+    private_key: Path, public_key: Path, custody: Optional[dict] = None
+) -> CheckResult:
     """private.asc and public.asc are the two halves of ONE key.
 
     Discovered on Chef's primary node 2026-08-14: the identity held a private
@@ -276,6 +347,12 @@ def check_keypair_match(private_key: Path, public_key: Path) -> CheckResult:
     A key that cannot verify what it signs is not an identity, hence FAIL.
     Missing halves are someone else's check to fail, so they only WARN here.
     """
+    if not private_key.exists() and public_key.exists() and _declared_offline(custody):
+        return CheckResult(
+            "keypair_match",
+            Status.OK,
+            f"nothing to compare: the private half is held OFFLINE, {_declared_offline(custody)}",
+        )
     if not private_key.exists() or not public_key.exists():
         return CheckResult(
             "keypair_match",
@@ -316,9 +393,18 @@ def check_keypair_match(private_key: Path, public_key: Path) -> CheckResult:
     )
 
 
-def check_private_key_permissions(private_key: Path) -> CheckResult:
+def check_private_key_permissions(
+    private_key: Path, custody: Optional[dict] = None
+) -> CheckResult:
     """The private key file is not group/world accessible (must be 0600)."""
     if not private_key.exists():
+        offline = _declared_offline(custody)
+        if offline:
+            return CheckResult(
+                "private_key_perms",
+                Status.OK,
+                f"no private key on this host to protect: held OFFLINE, {offline}",
+            )
         return CheckResult(
             "private_key_perms",
             Status.FAIL,
@@ -743,10 +829,13 @@ def run_custody_checks(
         max_backup_age_days: Freshness window for the backup check.
     """
     p = paths or CustodyPaths.resolve(home)
+    custody = load_custody_declaration(p.identity_dir)
     return [
-        check_identity_present(p.private_key, p.public_key, p.profile, p.expected_fingerprint),
-        check_keypair_match(p.private_key, p.public_key),
-        check_private_key_permissions(p.private_key),
+        check_identity_present(
+            p.private_key, p.public_key, p.profile, p.expected_fingerprint, custody
+        ),
+        check_keypair_match(p.private_key, p.public_key, custody),
+        check_private_key_permissions(p.private_key, custody),
         check_key_status(p.public_key),
         check_revocation_cert(p.revocation_cert, p.public_key),
         check_keystore_integrity(p.keystore),

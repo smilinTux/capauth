@@ -9,6 +9,7 @@ leaks into any check output.
 
 from __future__ import annotations
 
+import json
 import os
 import sqlite3
 import time
@@ -43,6 +44,7 @@ from capauth.custody import (
     check_private_key_permissions,
     check_revocation_cert,
     exit_code,
+    load_custody_declaration,
     format_report,
     overall_status,
     report_to_dict,
@@ -581,3 +583,148 @@ def test_a_bare_revocation_for_a_DIFFERENT_key_is_still_rejected(good_paths):
     result = check_revocation_cert(good_paths.revocation_cert, good_paths.public_key)
     assert result.status is Status.FAIL
     assert "not this identity" in result.detail.lower()
+
+
+# ── declared offline custody (card 955250f4) ─────────────────────────────────
+#
+# After the 2026-08-14 cleanup, noroc2027's operator home is in its CORRECT
+# state and doctor reported FAIL forever: identity_present and
+# private_key_perms both fail on an absent private.asc, and keypair_match can
+# only WARN. All three trace to ONE fact, that the operator/root private key is
+# in offline custody, which is the documented design (capauth-backup.sh's own
+# header, COLD_MACHINE_BOOTSTRAP_AND_DR.md Step 1).
+#
+# A permanently-red gate on a healthy node is its own hazard: this session
+# found seven gates that were always green or always red, and every one had
+# stopped being read. Making doctor permanently red here would have made an
+# eighth.
+#
+# The fix is a DECLARATION, never a softening. Silence still fails. Only an
+# explicit, attributable statement passes, and the report names it so the pass
+# is auditable rather than assumed.
+
+
+def _declare_offline(paths, **extra):
+    (paths.identity_dir / "custody.json").write_text(
+        json.dumps(
+            {
+                "private_key": "offline",
+                "declared_by": "chef",
+                "declared_at": "2026-08-14T08:00:00Z",
+                "note": "root key in offline custody per DR runbook Step 1",
+                **extra,
+            }
+        ),
+        encoding="utf-8",
+    )
+
+
+def test_identity_present_is_ok_when_the_private_key_is_declared_offline(good_paths):
+    good_paths.private_key.unlink()
+    _declare_offline(good_paths)
+    r = check_identity_present(
+        good_paths.private_key,
+        good_paths.public_key,
+        good_paths.profile,
+        custody=load_custody_declaration(good_paths.identity_dir),
+    )
+    assert r.status is Status.OK
+    assert "offline" in r.detail.lower()
+    assert "chef" in r.detail.lower(), "the report must name who declared it"
+
+
+def test_a_missing_private_key_with_NO_declaration_still_fails(good_paths):
+    """Silence must never pass. This is the whole safety of the mechanism."""
+    good_paths.private_key.unlink()
+    r = check_identity_present(
+        good_paths.private_key,
+        good_paths.public_key,
+        good_paths.profile,
+        custody=load_custody_declaration(good_paths.identity_dir),
+    )
+    assert r.status is Status.FAIL
+
+
+def test_a_declaration_does_not_excuse_a_key_that_is_actually_there(good_paths):
+    """Declaring 'offline' while a private key sits on disk is a contradiction:
+    the declaration must not suppress checks on material that exists."""
+    _declare_offline(good_paths)
+    r = check_private_key_permissions(
+        good_paths.private_key, custody=load_custody_declaration(good_paths.identity_dir)
+    )
+    assert r.status is Status.OK  # the real key is 0600 in the fixture
+    assert "offline" not in r.detail.lower()
+
+
+def test_private_key_perms_is_ok_when_declared_offline(good_paths):
+    good_paths.private_key.unlink()
+    _declare_offline(good_paths)
+    r = check_private_key_permissions(
+        good_paths.private_key, custody=load_custody_declaration(good_paths.identity_dir)
+    )
+    assert r.status is Status.OK
+    assert "offline" in r.detail.lower()
+
+
+def test_keypair_match_is_ok_when_declared_offline(good_paths):
+    good_paths.private_key.unlink()
+    _declare_offline(good_paths)
+    r = check_keypair_match(
+        good_paths.private_key,
+        good_paths.public_key,
+        custody=load_custody_declaration(good_paths.identity_dir),
+    )
+    assert r.status is Status.OK
+    assert "offline" in r.detail.lower()
+
+
+def test_a_declaration_never_excuses_a_MISMATCHED_pair(good_paths):
+    """The 2026-08-14 bug must still be caught on a home that declares custody."""
+    stranger = _new_ed25519_key("Someone Else", "else@test.io")
+    good_paths.public_key.write_text(str(stranger.pubkey), encoding="utf-8")
+    _declare_offline(good_paths)
+    r = check_keypair_match(
+        good_paths.private_key,
+        good_paths.public_key,
+        custody=load_custody_declaration(good_paths.identity_dir),
+    )
+    assert r.status is Status.FAIL
+
+
+def test_a_malformed_declaration_is_ignored_not_trusted(good_paths):
+    """A declaration that will not parse must not become a free pass."""
+    good_paths.private_key.unlink()
+    (good_paths.identity_dir / "custody.json").write_text("{not json", encoding="utf-8")
+    r = check_identity_present(
+        good_paths.private_key,
+        good_paths.public_key,
+        good_paths.profile,
+        custody=load_custody_declaration(good_paths.identity_dir),
+    )
+    assert r.status is Status.FAIL
+
+
+def test_a_declaration_missing_its_attribution_is_rejected(good_paths):
+    """'offline' with nobody's name on it is an assertion, not an attestation."""
+    good_paths.private_key.unlink()
+    (good_paths.identity_dir / "custody.json").write_text(
+        json.dumps({"private_key": "offline"}), encoding="utf-8"
+    )
+    r = check_identity_present(
+        good_paths.private_key,
+        good_paths.public_key,
+        good_paths.profile,
+        custody=load_custody_declaration(good_paths.identity_dir),
+    )
+    assert r.status is Status.FAIL
+
+
+def test_a_declared_home_with_everything_else_healthy_passes_overall(good_paths):
+    """The card's third criterion: overall OK without weakening any check."""
+    good_paths.private_key.unlink()
+    _declare_offline(good_paths)
+    results = run_custody_checks(paths=good_paths)
+    assert overall_status(results) is Status.OK, [
+        (r.name, r.status.value, r.detail) for r in results if r.status is not Status.OK
+    ]
+    assert exit_code(results) == 0

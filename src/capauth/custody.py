@@ -414,7 +414,35 @@ def _revocation_fingerprints(cert_path: Path) -> tuple[bool, set[str]] | None:
     try:
         import pgpy
         from pgpy.constants import SignatureType
+    except Exception:
+        return None
 
+    try:
+        raw = cert_path.read_text(encoding="utf-8", errors="ignore")
+    except OSError:
+        return None
+
+    # A real `gpg --gen-revoke` emits a BARE revocation signature packet wrapped
+    # in "BEGIN PGP PUBLIC KEY BLOCK" armor. pgpy rejects that both ways: as a
+    # key (no key packet) and as a signature (wrong armor label). Try the
+    # signature reading first, swapping the label, since that is the artifact
+    # operators actually produce.
+    try:
+        sig = pgpy.PGPSignature.from_blob(raw.replace("PGP PUBLIC KEY BLOCK", "PGP SIGNATURE"))
+        if sig.type in (
+            SignatureType.KeyRevocation,
+            SignatureType.SubkeyRevocation,
+            SignatureType.CertRevocation,
+        ):
+            # A signature names its signer by 16-hex key id, not a full
+            # fingerprint. Callers compare against the fingerprint, so hand back
+            # the key id and let the comparison be suffix-aware.
+            return True, {str(sig.signer).upper()}
+        return False, set()
+    except Exception:
+        pass
+
+    try:
         key, _ = pgpy.PGPKey.from_file(str(cert_path))
     except Exception:
         return None
@@ -496,7 +524,14 @@ def check_revocation_cert(revocation_cert: Path, public_key: Path | None = None)
         )
     if public_key is not None and public_key.exists():
         live_fpr, _ = _load_public_fingerprint(public_key)
-        if live_fpr and live_fpr.upper() not in {f.upper() for f in fprs}:
+        known = {f.upper() for f in fprs}
+        live_up = live_fpr.upper() if live_fpr else ""
+        # A bare revocation signature identifies its signer by KEY ID (the last
+        # 16 hex of the fingerprint), so accept an exact match or that suffix.
+        matched = bool(live_up) and (
+            live_up in known or any(live_up.endswith(f) for f in known if len(f) == 16)
+        )
+        if live_fpr and not matched:
             return CheckResult(
                 "revocation_cert",
                 Status.FAIL,

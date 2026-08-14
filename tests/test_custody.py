@@ -538,3 +538,46 @@ def test_revocation_cert_warns_rather_than_fails_when_it_cannot_be_parsed(good_p
     )
     result = check_revocation_cert(good_paths.revocation_cert, good_paths.public_key)
     assert result.status is Status.WARN
+
+
+# ── the format gpg --gen-revoke ACTUALLY emits (2026-08-14) ──────────────────
+#
+# The validity check landed parsing certs as PGPKey, because the fixtures built
+# them as "public key with a revocation signature attached". A real
+# `gpg --gen-revoke` produces something different: a bare revocation SIGNATURE
+# packet, wrapped in `BEGIN PGP PUBLIC KEY BLOCK` armor. pgpy refuses it both
+# ways, PGPKey because there is no key packet, PGPSignature because the armor
+# header says PUBLIC KEY BLOCK.
+#
+# So the check WARNed "could not be parsed" on the one artifact that matters
+# most: the genuine root revocation certificate Chef generated. Caught by
+# running it against real output rather than only against fixtures shaped by
+# the same assumption as the code.
+
+
+def _gnupg_style_revocation(key) -> str:
+    """A bare revocation signature in PUBLIC KEY BLOCK armor, as gpg emits."""
+    import warnings
+
+    from pgpy.constants import SignatureType
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        sig = key.revoke(key, sigtype=SignatureType.KeyRevocation)
+    return str(sig).replace("PGP SIGNATURE", "PGP PUBLIC KEY BLOCK")
+
+
+def test_a_bare_gnupg_revocation_certificate_is_accepted(good_paths, good_key):
+    """The real-world artifact, not the fixture-shaped one."""
+    good_paths.revocation_cert.write_text(_gnupg_style_revocation(good_key), encoding="utf-8")
+    result = check_revocation_cert(good_paths.revocation_cert, good_paths.public_key)
+    assert result.status is Status.OK, result.detail
+
+
+def test_a_bare_revocation_for_a_DIFFERENT_key_is_still_rejected(good_paths):
+    """Matching on the signer key id must not become a rubber stamp."""
+    stranger = _new_ed25519_key("Someone Else", "else@test.io")
+    good_paths.revocation_cert.write_text(_gnupg_style_revocation(stranger), encoding="utf-8")
+    result = check_revocation_cert(good_paths.revocation_cert, good_paths.public_key)
+    assert result.status is Status.FAIL
+    assert "not this identity" in result.detail.lower()

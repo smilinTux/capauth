@@ -24,6 +24,16 @@ flag) is a deliberate later step and lives in those repos, not here.
 
 from __future__ import annotations
 
+from .canonicalize import (
+    DeviceRewrite,
+    RewritePlan,
+    RewriteReport,
+    TokenRewrite,
+    TokenSkip,
+    apply_canonical_rewrite,
+    format_rewrite_plan,
+    scan_canonical_rewrite,
+)
 from .kernel import PairingError, approve, enroll_device, list_devices, revoke
 from .records import (
     MODE_SEVERITY,
@@ -65,4 +75,13 @@ __all__ = [
     "SIDECAR_VERSION",
     "default_base_dir",
     "fingerprint_for",
+    # canonical-subject rewrite (card N5)
+    "DeviceRewrite",
+    "TokenRewrite",
+    "TokenSkip",
+    "RewritePlan",
+    "RewriteReport",
+    "scan_canonical_rewrite",
+    "format_rewrite_plan",
+    "apply_canonical_rewrite",
 ]

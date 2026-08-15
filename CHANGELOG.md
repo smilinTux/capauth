@@ -16,8 +16,32 @@ All notable changes to `capauth` are documented here. The format is based on
   alone so it can never race a concurrent mint into loss. A trailing `Z` UTC suffix
   is normalized before parsing so GC works on Python 3.10 (whose `fromisoformat`
   predates `Z` support).
+- **One-shot canonical-subject store migration** (`capauth.pairing.canonicalize`,
+  driven by `scripts/migrate_canonical_subjects.py`). Rewrites pre-existing
+  device records and capability tokens onto the canonical fqid grammar from
+  `IDENTITY_NAMING_STANDARD.md`. `enroll_device` already canonicalizes new
+  enrollments; this closes the gap for records that predate it. A live dry-run
+  against a real fleet store planned 253 device-sidecar rewrites, collapsing to
+  143 distinct non-canonical subjects.
+  - Ships `--dry-run` (the default) that prints the full plan and writes
+    nothing, and is idempotent: a second `--execute` run is a no-op.
+  - Device sidecars are edited in place, touching only the per-device
+    `subject` field and leaving the surrounding v1 peer record byte-verbatim,
+    with a one-time `subject_migrated_from` / `subject_migrated_at` stamp.
+  - **Capability tokens are re-issued, never edited in place.** A PGP signature
+    covers the whole payload including `subject`, so patching that field would
+    leave a signature that verifies against the wrong bytes: an inconsistency
+    more deceptive than the one being fixed. A non-canonical active token is
+    re-issued with a fresh `token_id` (original `expires_at` preserved) and the
+    old one revoked. Revoked and expired tokens are deliberately left alone,
+    since re-issuing them would restore a dead grant.
 
 ### Fixed
+
+- `authz._subject_tokens` now dual-reads legacy and canonical subject
+  spellings, mirroring the dual-read `list_devices` already had. Without it a
+  legacy caller would resolve its migrated device but then miss the
+  exact-match token lookup, and `decide()` correlates the two by exact string.
 
 - **Docs described a CLI that does not exist.** `SOP.md` and `README.md` told
   operators to run `capauth did generate` and `capauth did identity-card`. **There

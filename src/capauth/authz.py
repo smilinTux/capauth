@@ -107,6 +107,7 @@ from typing import Optional
 
 from pydantic import BaseModel, Field
 
+from .exceptions import SubjectNamingError
 from .pairing import (
     DeviceRecord,
     EnrollmentMode,
@@ -114,6 +115,7 @@ from .pairing import (
     list_devices,
     mode_satisfies,
 )
+from .subject import canonical_subject
 from .tokens import Capability, SignedToken, is_revoked, list_tokens, signature_verifies
 
 logger = logging.getLogger("capauth.authz")
@@ -585,9 +587,27 @@ def _strongest_mode(devices: list[DeviceRecord]) -> Optional[EnrollmentMode]:
 
 
 def _subject_tokens(subject: str, home: Path) -> list[SignedToken]:
-    """All stored tokens whose payload subject matches ``subject``."""
-    wanted = subject.strip().lower()
-    return [t for t in list_tokens(home) if (t.payload.subject or "").strip().lower() == wanted]
+    """All stored tokens whose payload subject matches ``subject``.
+
+    Matches on the raw (lowercased) ``subject`` as given AND, when it
+    canonicalizes, on its canonical fqid -- the same dual-read
+    :func:`capauth.pairing.list_devices` already does for device records
+    (card N3/N4). Card N5 rewrites the live store's device and token
+    subjects to canonical, but a caller mid-upgrade may still present a
+    legacy-shaped subject for one release; without this, a legacy caller
+    would find its (now-canonical) device record via ``list_devices``'s dual
+    read but then fail here on an exact-match miss against a token that was
+    ALSO rewritten to canonical, denying every capability for a subject that
+    should still resolve. A subject that does not canonicalize is not a
+    defect to refuse here, only a shape matched by its raw form (same
+    fail-open-to-raw-comparison posture as ``list_devices``).
+    """
+    wanted = {subject.strip().lower()}
+    try:
+        wanted.add(canonical_subject(subject.strip()))
+    except SubjectNamingError:
+        pass
+    return [t for t in list_tokens(home) if (t.payload.subject or "").strip().lower() in wanted]
 
 
 def decide(

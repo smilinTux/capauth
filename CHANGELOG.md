@@ -6,6 +6,17 @@ All notable changes to `capauth` are documented here. The format is based on
 
 ## [Unreleased]
 
+### Added
+
+- **`tokens.prune_expired_tokens(home)` GC for the token store.** `_store_token`
+  writes one file per issued token and nothing reaped them, so the per-request
+  operator-audience mint path flooded `home/security/tokens` (observed: 38k files /
+  153MB of expired 12h-TTL tokens, none read). The GC deletes proven-expired token
+  files, keeps valid and non-expiring ones, and leaves an unreadable/mid-write file
+  alone so it can never race a concurrent mint into loss. A trailing `Z` UTC suffix
+  is normalized before parsing so GC works on Python 3.10 (whose `fromisoformat`
+  predates `Z` support).
+
 ### Fixed
 
 - **Docs described a CLI that does not exist.** `SOP.md` and `README.md` told

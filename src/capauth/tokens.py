@@ -916,6 +916,11 @@ def prune_expired_tokens(home: Path) -> int:
         if expires_at is None:
             continue  # non-expiring token, keep
         try:
+            # Normalize a trailing 'Z' to '+00:00': _store_token writes UTC as
+            # '...Z', which datetime.fromisoformat cannot parse before Python 3.11.
+            # Without this, GC silently prunes nothing on 3.10.
+            if isinstance(expires_at, str) and expires_at.endswith("Z"):
+                expires_at = expires_at[:-1] + "+00:00"
             exp = datetime.fromisoformat(expires_at)
         except (ValueError, TypeError):
             continue  # unparseable timestamp: do not assume expired

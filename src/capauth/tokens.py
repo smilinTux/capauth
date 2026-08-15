@@ -888,6 +888,48 @@ def _store_token(home: Path, token: SignedToken) -> None:
     token_file.write_text(json.dumps(data, indent=2, default=str), encoding="utf-8")
 
 
+def prune_expired_tokens(home: Path) -> int:
+    """Delete stored token files whose token has expired. Returns the count removed.
+
+    :func:`_store_token` writes one file per issued token and nothing prunes them,
+    so a short-TTL, high-rate mint path (the per-request operator-audience token)
+    floods ``home/security/tokens``. This removes the expired debris:
+
+      * an expired token (``expires_at`` in the past) is deleted;
+      * a still-valid token, or a non-expiring one (``expires_at=None``), is kept;
+      * an unreadable/unparseable file is LEFT ALONE (it may be a mid-write), never
+        deleted, so GC can never race a concurrent mint into data loss.
+
+    Safe to call opportunistically from a mint path or a periodic sweep.
+    """
+    token_dir = home / "security" / "tokens"
+    if not token_dir.is_dir():
+        return 0
+    now = datetime.now(timezone.utc)
+    removed = 0
+    for token_file in token_dir.glob("*.json"):
+        try:
+            data = json.loads(token_file.read_text(encoding="utf-8"))
+            expires_at = data.get("payload", {}).get("expires_at")
+        except (json.JSONDecodeError, OSError, AttributeError):
+            continue  # unreadable / mid-write: leave it, it is not proven expired
+        if expires_at is None:
+            continue  # non-expiring token, keep
+        try:
+            exp = datetime.fromisoformat(expires_at)
+        except (ValueError, TypeError):
+            continue  # unparseable timestamp: do not assume expired
+        if exp.tzinfo is None:
+            exp = exp.replace(tzinfo=timezone.utc)
+        if now > exp:
+            try:
+                token_file.unlink(missing_ok=True)
+                removed += 1
+            except OSError:
+                logger.debug("could not prune %s", token_file.name)
+    return removed
+
+
 def _load_revocation_list(revocation_file: Path) -> dict:
     """Load the token revocation list."""
     if not revocation_file.exists():
@@ -909,6 +951,7 @@ __all__ = [
     "signature_verifies",
     "AUDIENCE_SCOPES",
     "mint_audience_token",
+    "prune_expired_tokens",
     "mint_agent_audience_token",
     "verify_audience_token",
     "has_scope",

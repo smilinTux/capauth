@@ -232,6 +232,7 @@ def issue_token(
     ttl_hours: Optional[int] = 24,
     metadata: Optional[dict] = None,
     sign: bool = True,
+    store: bool = True,
 ) -> SignedToken:
     """Issue a new capability token signed by the agent's CapAuth key.
 
@@ -248,6 +249,11 @@ def issue_token(
             :func:`capauth.authz.decide` rejects unsigned tokens, so such a token
             authorizes nothing; it exists for tests and for callers that only
             need the payload record.
+        store: Whether to persist the token to ``home/security/tokens``. Default
+            True. ``store=False`` returns the token without writing a file, for a
+            self-contained token that is verified by signature and never looked up
+            in the store (e.g. a short-TTL audience token), so a high-rate mint
+            path does not flood the store.
 
     Returns:
         SignedToken with the payload and, when ``sign``, a verified signature.
@@ -275,7 +281,8 @@ def issue_token(
     token = SignedToken(payload=payload)
     _apply_signature(token, home, sign=sign)
 
-    _store_token(home, token)
+    if store:
+        _store_token(home, token)
     logger.info("Issued token %s for %s (%s)", payload.token_id[:12], subject, token_type.value)
     return token
 
@@ -391,6 +398,7 @@ def mint_audience_token(
     ttl_hours: int = 1,
     metadata: Optional[dict] = None,
     sign: bool = True,
+    store: bool = True,
 ) -> SignedToken:
     """Mint a short-lived, audience-scoped capability token.
 
@@ -416,6 +424,10 @@ def mint_audience_token(
         metadata: Additional claims to embed.
         sign: Whether to PGP-sign the token. See :func:`issue_token` for what
             ``sign=False`` means for authorization (the PDP rejects it).
+        store: Whether to persist the token (default True). An audience token is
+            self-contained (verified by signature, never looked up in the store),
+            so ``store=False`` mints it without writing a file, which is what a
+            high-rate per-request mint path should use.
 
     Returns:
         A :class:`SignedToken` whose payload has ``audience`` set and
@@ -445,7 +457,8 @@ def mint_audience_token(
     token = SignedToken(payload=payload)
     _apply_signature(token, home, sign=sign)
 
-    _store_token(home, token)
+    if store:
+        _store_token(home, token)
     logger.info(
         "Minted audience token %s for %s (audience=%s, scopes=%s)",
         payload.token_id[:12],
@@ -465,6 +478,7 @@ def mint_agent_audience_token(
     home: Optional[Path] = None,
     sign: bool = True,
     metadata: Optional[dict] = None,
+    store: bool = True,
 ) -> SignedToken:
     """Mint an audience-scoped token for an agent using its resolved identity.
 
@@ -524,6 +538,7 @@ def mint_agent_audience_token(
         ttl_hours=ttl_hours,
         metadata=metadata,
         sign=sign,
+        store=store,
     )
 
 

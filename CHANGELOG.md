@@ -8,6 +8,14 @@ All notable changes to `capauth` are documented here. The format is based on
 
 ### Added
 
+- **`store` parameter on `issue_token` / `mint_audience_token` /
+  `mint_agent_audience_token`** (default `True`). `store=False` mints a token
+  without writing a file to `home/security/tokens`. An audience token is
+  self-contained (verified by signature, never looked up in the store), so
+  persisting one file per mint is pointless and was the substrate of the
+  operator-audience flood; the per-request mint path uses `store=False`. Card
+  `e793b6bc`.
+
 - **`tokens.prune_expired_tokens(home)` GC for the token store.** `_store_token`
   writes one file per issued token and nothing reaped them, so the per-request
   operator-audience mint path flooded `home/security/tokens` (observed: 38k files /

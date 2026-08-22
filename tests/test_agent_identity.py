@@ -38,9 +38,7 @@ def _no_live_cluster(tmp_path: Path, monkeypatch):
     """
     from capauth import agent_identity
 
-    monkeypatch.setattr(
-        agent_identity, "_CLUSTER_LOOKUP", [tmp_path / "no-live-cluster.json"]
-    )
+    monkeypatch.setattr(agent_identity, "_CLUSTER_LOOKUP", [tmp_path / "no-live-cluster.json"])
 
 
 # ---------------------------------------------------------------------------
@@ -97,9 +95,7 @@ class TestBuildFqid:
 class TestLoadCluster:
     def test_loads_from_tmp(self, tmp_path: Path):
         cluster_file = tmp_path / "cluster.json"
-        cluster_file.write_text(
-            json.dumps({"realm": "example.test", "operator": "ops"})
-        )
+        cluster_file.write_text(json.dumps({"realm": "example.test", "operator": "ops"}))
         from capauth import agent_identity
 
         original = agent_identity._CLUSTER_LOOKUP
@@ -135,9 +131,7 @@ class TestResolveExplicit:
 
     def test_fqid_with_cluster(self, tmp_path: Path):
         cluster_file = tmp_path / "cluster.json"
-        cluster_file.write_text(
-            json.dumps({"realm": "example.test", "operator": "ops"})
-        )
+        cluster_file.write_text(json.dumps({"realm": "example.test", "operator": "ops"}))
         from capauth import agent_identity
 
         original = agent_identity._CLUSTER_LOOKUP
@@ -449,9 +443,7 @@ class TestResolveDualUri:
         from capauth import agent_identity
 
         cluster_file = tmp_path / "cluster.json"
-        cluster_file.write_text(
-            json.dumps({"realm": "example.test", "operator": "ops"})
-        )
+        cluster_file.write_text(json.dumps({"realm": "example.test", "operator": "ops"}))
         capauth_dir = tmp_path / "ca"
         (capauth_dir / "identity").mkdir(parents=True)
         fp = "D" * 40

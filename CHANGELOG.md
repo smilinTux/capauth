@@ -20,6 +20,11 @@ All notable changes to `capauth` are documented here. The format is based on
 
 ### Fixed
 
+- Restored the declared Python 3.10 support for delegated capabilities by using
+  compatible UTC, string-enum, `Never`, and `Self` definitions. Downstream
+  SKVault installs can again complete their full 3.10 test gate.
+- Restored Ruff formatting for the delegated-capability and CLI modules so the
+  enforced lint gate agrees with the released source.
 - **Identity docstrings taught the wrong fqid shape.** `agent_identity.py`
   showed `lumina@chef.skworld` in its prose, its worked example and its
   doctest: the missing-TLD form that the N5 store migration exists to correct.

@@ -197,8 +197,7 @@ def _offer_sync(
     ok = setup_syncthing_sync(capauth_dir=capauth_path)
     if ok:
         console.print(
-            "  [green]✓[/] Syncthing public identity sync enabled; "
-            "private custody remains local"
+            "  [green]✓[/] Syncthing public identity sync enabled; private custody remains local"
         )
     else:
         console.print("  [yellow]⚠[/] Could not configure Syncthing sync — set up manually")
@@ -239,7 +238,7 @@ def sync_cmd(ctx: click.Context, enable: bool) -> None:
             console.print(f"[red]✗[/] Cannot enforce sync custody boundary: {exc}")
             raise SystemExit(1)
         console.print(
-            "[green]✓[/] Syncthing public identity sync configured; " "secret exclusions verified"
+            "[green]✓[/] Syncthing public identity sync configured; secret exclusions verified"
         )
         devices = get_known_devices()
         console.print(f"  Sharing with {len(devices)} device(s)")
@@ -253,7 +252,7 @@ def sync_cmd(ctx: click.Context, enable: bool) -> None:
     if ok:
         devices = get_known_devices()
         console.print(
-            "[green]✓[/] Syncthing public identity sync enabled; " "private custody remains local"
+            "[green]✓[/] Syncthing public identity sync enabled; private custody remains local"
         )
         console.print(f"  Sharing with {len(devices)} device(s)")
         console.print("  [dim]Restart Syncthing to apply: systemctl --user restart syncthing[/]")

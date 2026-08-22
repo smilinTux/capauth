@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import traceback
 from concurrent.futures import ThreadPoolExecutor
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from threading import Lock
 from uuid import uuid4
 
@@ -34,6 +34,8 @@ from capauth.delegated import (
     parse_authorization_bearer,
     parse_presented_token,
 )
+
+UTC = timezone.utc
 
 ISSUER = "A" * 40
 

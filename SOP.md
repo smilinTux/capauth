@@ -182,6 +182,11 @@ its `integration` job is `continue-on-error: true`, so that job is red-tolerant 
 design. `ci.yml` is the honest gate. Add the `skcapstone doctor` identity invariants
 on top when the change touches the resolver.
 
+The Python 3.10 leg is a supported compatibility boundary, not an advisory job.
+Shared modules must use `typing_extensions` for post-3.10 typing features and
+portable UTC and string-enum definitions. A new feature is not releasable if
+importing it breaks a supported matrix interpreter.
+
 ---
 
 ## 5. Release / Deploy

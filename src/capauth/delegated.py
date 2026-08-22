@@ -11,15 +11,26 @@ from __future__ import annotations
 import hashlib
 import json
 from collections.abc import Callable
-from datetime import UTC, datetime, timedelta
-from enum import StrEnum
+from datetime import datetime, timedelta, timezone
+from enum import Enum
 from threading import Lock
-from typing import Literal, Never, Protocol, Self
+from typing import Literal, Protocol
 from uuid import uuid4
 
 from pydantic import BaseModel, ConfigDict, Field, field_serializer, model_validator
+from typing_extensions import Never, Self
 
 from .tokens import SignedToken, TokenPayload, TokenType, signature_verifies
+
+UTC = timezone.utc
+
+
+class StrEnum(str, Enum):
+    """Python 3.10 compatible subset of enum.StrEnum used by this module."""
+
+    def __str__(self) -> str:
+        return str.__str__(self.value)
+
 
 MAX_DELEGATION_DEPTH = 2
 MAX_TTL_SECONDS = 3600

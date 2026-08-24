@@ -179,7 +179,9 @@ _LOGIN_PAGE = """<!DOCTYPE html>
             padding:.8rem;font-size:1rem;cursor:pointer;font-weight:600}}
     button:hover{{background:#6d28d9}}
     .nonce-box{{background:#0f0f1a;border:1px solid #334155;border-radius:8px;padding:.7rem;
-                margin-bottom:1rem;font-family:monospace;font-size:.78rem;color:#00e5ff;word-break:break-all}}
+                margin-bottom:.5rem;font-family:monospace;font-size:.78rem;color:#00e5ff;
+                white-space:pre-wrap;word-break:break-all}}
+    .copy{{width:auto;padding:.45rem .7rem;font-size:.78rem;background:#334155;margin-bottom:1rem}}
     .err{{color:#f87171;font-size:.85rem;margin-top:.6rem;display:none}}
     code{{color:#a78bfa}}
   </style>
@@ -188,16 +190,26 @@ _LOGIN_PAGE = """<!DOCTYPE html>
 <div class="card">
   <h1>Sign in with CapAuth</h1>
   <p class="sub">Authenticate to <strong>{client_name}</strong> with your PGP key.
-     No password — sign the challenge to prove key possession.</p>
+     No password. Use a passkey if you already added one.</p>
+
+  <button id="pk-btn" onclick="passkeyLogin()" style="background:#0e7490">Sign in with a passkey (recommended)</button>
+  <p class="sub" style="font-size:.74rem;margin:.4rem 0 1rem">After one PGP-proven enrollment, passkey login needs no fingerprint or pasted signature.
+    <a href="{base_url}/oidc/passkey/enroll" style="color:#a78bfa">Add a passkey</a>
+  </p>
+
+  <div style="display:flex;align-items:center;gap:.6rem;margin:0 0 1rem;color:#475569;font-size:.74rem">
+    <span style="flex:1;height:1px;background:#334155"></span>PGP FALLBACK<span style="flex:1;height:1px;background:#334155"></span>
+  </div>
 
   <div class="step">1 — Your PGP fingerprint</div>
   <label for="fp">Fingerprint (40- or 64-hex chars)</label>
   <input id="fp" type="text" maxlength="50" placeholder="ABCDEF0123..." autocomplete="off"/>
 
-  <div class="step">2 — Challenge nonce</div>
-  <div class="nonce-box" id="nonce">Enter your fingerprint to load a challenge…</div>
+  <div class="step">2 - Exact message to sign</div>
+  <div class="nonce-box" id="nonce">Enter your fingerprint to load the complete signed payload.</div>
+  <button class="copy" type="button" onclick="copyPayload()">Copy message</button>
 
-  <div class="step">3 — Paste your PGP signature over the challenge</div>
+  <div class="step">3 - Paste your signed message or detached signature</div>
   <label for="sig">Signed message / signature (ASCII armor)</label>
   <textarea id="sig" placeholder="-----BEGIN PGP MESSAGE-----&#10;...&#10;-----END PGP MESSAGE-----"></textarea>
 
@@ -209,9 +221,8 @@ _LOGIN_PAGE = """<!DOCTYPE html>
   <div style="display:flex;align-items:center;gap:.6rem;margin:1.1rem 0 .2rem;color:#475569;font-size:.74rem">
     <span style="flex:1;height:1px;background:#334155"></span>OR<span style="flex:1;height:1px;background:#334155"></span>
   </div>
-  <button id="pk-btn" onclick="passkeyLogin()" style="background:#0e7490">🔑 Sign in with a passkey</button>
-  <button id="ld-btn" onclick="capauthLocalSign()" style="background:#10b981;margin-top:.5rem">📱 Sign on THIS device (key in your bunker)</button>
-  <button id="ph-btn" onclick="capauthPhoneLogin()" style="background:#7C3AED;margin-top:.5rem">📷 Sign from another device (QR)</button>
+  <button id="ld-btn" onclick="capauthLocalSign()" style="background:#10b981;margin-top:.5rem">Sign on this device (key in your bunker)</button>
+  <button id="ph-btn" onclick="capauthPhoneLogin()" style="background:#7C3AED;margin-top:.5rem">Sign from another device (QR)</button>
   <div id="pq" style="display:none;margin-top:1rem;text-align:center">
     <img id="pq-img" alt="pairing QR" style="width:200px;height:200px;background:#fff;border-radius:10px"/>
     <div id="pq-status" class="sub" style="margin-top:.5rem;color:#a78bfa"></div>
@@ -219,8 +230,8 @@ _LOGIN_PAGE = """<!DOCTYPE html>
   </div>
 
   <p style="margin-top:1rem;font-size:.74rem;color:#475569">
-    CLI: <code>capauth sign --nonce &lt;nonce&gt;</code> &nbsp;·&nbsp; the browser extension fills the signature automatically.
-    &nbsp;·&nbsp; <a href="{base_url}/oidc/passkey/enroll" style="color:#a78bfa">add a passkey</a>
+    Manual GPG: copy the complete message, then use <code>gpg --armor --sign</code> for an inline signed message
+    or <code>gpg --armor --detach-sign</code> for a detached signature. The browser extension can sign automatically.
   </p>
 </div>
 
@@ -243,6 +254,7 @@ async function passkeyLogin(){{
   }}catch(e){{ setErr("Passkey sign-in: " + e.message); }}
 }}
 let currentNonce = null, currentEcho = null;
+let currentPayload = "";
 
 function setErr(m){{ const e=document.getElementById("err"); e.textContent=m; e.style.display="block"; }}
 
@@ -256,13 +268,22 @@ async function loadChallenge(fp){{
   return r.json();
 }}
 
+async function copyPayload(){{
+  if(!currentPayload) return setErr("Enter a valid fingerprint to load a fresh challenge first.");
+  try{{ await navigator.clipboard.writeText(currentPayload); }}
+  catch(e){{ return setErr("Copy failed. Select the complete message and copy it manually."); }}
+}}
+
 document.getElementById("fp").addEventListener("blur", async function(){{
   const fp=this.value.trim().toUpperCase().replace(/\\s/g,"");
   if(![40,64].includes(fp.length)){{ return; }}
   try{{
     const ch=await loadChallenge(fp);
     currentNonce=ch.nonce; currentEcho=ch.client_nonce_echo; window._capauthCh=ch;
-    document.getElementById("nonce").textContent=ch.nonce;
+    currentPayload=["CAPAUTH_NONCE_V1", "nonce="+ch.nonce,
+      "client_nonce="+ch.client_nonce_echo, "timestamp="+ch.timestamp,
+      "service="+ch.service, "expires="+ch.expires].join("\\n");
+    document.getElementById("nonce").textContent=currentPayload;
     // window.capauth provider: auto-sign with Tier B origin-binding. The
     // extension injects origin=window.location.origin and signs in-extension —
     // the private key never reaches this page. Falls back to manual paste.

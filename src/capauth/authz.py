@@ -454,6 +454,50 @@ _CHANGE_RULES: tuple[CapabilityRule, ...] = (
     ),
 )
 
+# SKDashboard is a policy enforcement point, not the identity or resource-policy
+# owner. These rows establish the CapAuth enrollment floor for its closed
+# capability matrix. The owning service still supplies a separate resource
+# decision before any command is dispatched.
+_SKDASHBOARD_RULES: tuple[CapabilityRule, ...] = tuple(
+    CapabilityRule(
+        capability=capability,
+        required_capability=capability,
+        minimum_mode=mode,
+        description=description,
+    )
+    for capabilities, mode, description in (
+        (
+            (
+                "skdashboard.read",
+                "skdashboard.events.read",
+                "skdashboard.reports.read",
+            ),
+            EnrollmentMode.TOFU,
+            "Read an authorized control-plane projection; read-class.",
+        ),
+        (
+            (
+                "skdashboard.insights.query",
+                "skdashboard.actions.preview",
+            ),
+            EnrollmentMode.ATTESTED,
+            "Create a proposal or deterministic preview; write/compute-class.",
+        ),
+        (
+            (
+                "skdashboard.actions.authorize",
+                "skdashboard.commands.coordination",
+                "skdashboard.commands.cmdb",
+                "skdashboard.commands.service_operations",
+                "skdashboard.reports.deliver",
+            ),
+            EnrollmentMode.VERIFIED,
+            "Authorize or route an owner operation; act-class and verified only.",
+        ),
+    )
+    for capability in capabilities
+)
+
 #: The default, process-wide capability rule table, keyed by capability name.
 #: The seeded skchat rows plus the skgateway rows (L1.8) plus the skcode RCE rows
 #: (CR-6.2 C3) plus the skdashboard agentrun rows (card 640698fa) plus the
@@ -467,6 +511,7 @@ DEFAULT_RULES: dict[str, CapabilityRule] = {
         *_SKCODE_RULES,
         *_AGENTRUN_RULES,
         *_CHANGE_RULES,
+        *_SKDASHBOARD_RULES,
     )
 }
 

@@ -41,6 +41,16 @@ All notable changes to `capauth` are documented here. The format is based on
 
 ### Added
 
+- Added the SKDashboard control-plane authorization contract with separate
+  issuer, PDP, enforcement, and owner-policy identities; a closed read,
+  proposal, and mutation capability matrix; exact subject, agent, node,
+  purpose, audience, expiry, resource, and policy-revision binding; explicit
+  CORS, CSRF, TTL, and replay preconditions; and a fail-closed two-policy join
+  that preserves deny, Unknown, and unavailable outcomes. The `skdashboard`
+  audience now defaults to read-only, while proposal and mutation scopes require
+  explicit issuance. Local browser handout remains development-only and bearer
+  persistence remains forbidden.
+
 - **A strict reusable delegated capability-chain contract.**
   `capauth.delegated` adds a versioned request-local transport, complete-chain
   verification, bounded monotonic attenuation, current issuer and principal

@@ -242,6 +242,36 @@ def test_authorize_renders_login_page(oidc_app):
     assert router.store.pending_requests == 1
 
 
+def test_login_page_documents_exact_signing_contract(oidc_app):
+    client, _router = oidc_app
+    resp = client.get(
+        "/oidc/authorize",
+        params={
+            "client_id": CLIENT_ID,
+            "redirect_uri": REDIRECT_URI,
+            "scope": "openid profile email groups",
+            "state": VALID_STATE,
+            "nonce": VALID_NONCE,
+            "code_challenge": "a" * 43,
+            "code_challenge_method": "S256",
+        },
+    )
+
+    assert resp.status_code == 200
+    assert "Sign in with a passkey (recommended)" in resp.text
+    assert "After one PGP-proven enrollment" in resp.text
+    assert 'currentPayload=["CAPAUTH_NONCE_V1", "nonce="+ch.nonce' in resp.text
+    assert '"client_nonce="+ch.client_nonce_echo' in resp.text
+    assert '"timestamp="+ch.timestamp' in resp.text
+    assert '"service="+ch.service' in resp.text
+    assert '"expires="+ch.expires' in resp.text
+    assert "gpg --armor --sign" in resp.text
+    assert "gpg --armor --detach-sign" in resp.text
+    assert "capauth sign --nonce" not in resp.text
+    assert "Sign on this device (key in your bunker)" in resp.text
+    assert "Sign from another device (QR)" in resp.text
+
+
 def _start_login(client, router, *, challenge="", method="S256", nonce=VALID_NONCE):
     """Hit /authorize and pull the request_id out of the rendered page."""
     resp = client.get(

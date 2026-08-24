@@ -6,6 +6,9 @@ All notable changes to `capauth` are documented here. The format is based on
 
 ## [Unreleased]
 
+- Make OIDC login lead with passkeys and show the exact expiring PGP payload,
+  truthful inline and detached GPG commands, and existing local and QR options.
+
 - Fixed packaged bunker asset fallback to use its own path containment root while preserving local PWA traversal protection (card `46ad28a5`).
 
 - Package the CapAuth bunker login assets in the installed OIDC artifact so local-device signing works after wheel installation.

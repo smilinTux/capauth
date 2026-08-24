@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import base64
 import hashlib
-from typing import Any
+from urllib.parse import parse_qs, urlsplit
 
 import jwt as pyjwt
 import pytest
@@ -32,11 +32,9 @@ CLIENT_ID = "authentik"
 CLIENT_SECRET = "super-secret"
 REDIRECT_URI = "https://authentik.test/source/oauth/callback/capauth/"
 TEST_FP = "AAAA1111BBBB2222CCCC3333DDDD4444EEEE5555"
-
-
-# ---------------------------------------------------------------------------
-# Fixtures
-# ---------------------------------------------------------------------------
+DEFAULT_VERIFIER = "verifier-string-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+VALID_STATE = "state-0123456789abcdef"
+VALID_NONCE = "nonce-0123456789abcdef"
 
 
 @pytest.fixture
@@ -60,18 +58,18 @@ def client_registry() -> ClientRegistry:
 
 
 @pytest.fixture
-def oidc_app(monkeypatch, signing_key, client_registry):
+def oidc_app(monkeypatch, signing_key, client_registry, tmp_path):
     """A minimal FastAPI app mounting only the OIDC router, with PGP mocked."""
     monkeypatch.setenv("CAPAUTH_OIDC_ISSUER", ISSUER)
 
-    store = AuthCodeStore()
+    store = AuthCodeStore(path=tmp_path / "oidc-state.db")
     router = build_oidc_router(signing_key=signing_key, clients=client_registry, store=store)
 
     # Mock the PGP verify path. provider._verify_pgp lazily imports these symbols
     # from their source modules, so patching them there is sufficient — no real
     # crypto runs. "GOOD-SIG" => verified identity; anything else => failure.
-    import capauth.authentik.stage as stage_mod
     import capauth.authentik.nonce_store as ns_mod
+    import capauth.authentik.stage as stage_mod
     import capauth.authentik.verifier as ver_mod
 
     monkeypatch.setattr(
@@ -111,6 +109,7 @@ def oidc_app(monkeypatch, signing_key, client_registry):
     # Fake keystore: known fp already enrolled (no public_key needed).
     class _FakeKey:
         public_key_armor = "PUBKEY"
+        approved = True
 
     class _FakeKS:
         def get(self, fp):
@@ -132,11 +131,6 @@ def oidc_app(monkeypatch, signing_key, client_registry):
     return TestClient(fastapi_app), router
 
 
-# ---------------------------------------------------------------------------
-# Discovery + JWKS
-# ---------------------------------------------------------------------------
-
-
 def test_discovery_document_shape():
     doc = discovery_document(ISSUER)
     assert doc["issuer"] == ISSUER
@@ -148,6 +142,9 @@ def test_discovery_document_shape():
     assert "authorization_code" in doc["grant_types_supported"]
     assert "RS256" in doc["id_token_signing_alg_values_supported"]
     assert "S256" in doc["code_challenge_methods_supported"]
+    assert doc["code_challenge_methods_supported"] == ["S256"]
+    assert "none" not in doc["token_endpoint_auth_methods_supported"]
+    assert doc["revocation_endpoint"] == f"{ISSUER}/oidc/revoke"
     assert set(["openid", "profile", "email", "groups"]).issubset(doc["scopes_supported"])
 
 
@@ -172,11 +169,6 @@ def test_jwks_endpoint_publishes_rsa_key(oidc_app, signing_key):
     assert jwk["n"] and jwk["e"]
 
 
-# ---------------------------------------------------------------------------
-# Signing key roundtrip
-# ---------------------------------------------------------------------------
-
-
 def test_signing_key_sign_verify_roundtrip(signing_key):
     payload = {"sub": TEST_FP, "iss": ISSUER, "exp": 9999999999, "iat": 1}
     token = pyjwt.encode(
@@ -198,11 +190,6 @@ def test_signing_key_persists_kid(tmp_path):
     assert k1.public_pem == k2.public_pem
 
 
-# ---------------------------------------------------------------------------
-# PKCE
-# ---------------------------------------------------------------------------
-
-
 def test_verify_pkce_s256():
     verifier = "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk"
     challenge = (
@@ -212,16 +199,10 @@ def test_verify_pkce_s256():
     assert verify_pkce("wrong", challenge, "S256") is False
 
 
-def test_verify_pkce_plain_and_absent():
-    assert verify_pkce("abc", "abc", "plain") is True
+def test_verify_pkce_rejects_plain_absent_and_short():
+    assert verify_pkce("abc", "abc", "plain") is False
     assert verify_pkce("abc", "xyz", "plain") is False
-    # No challenge registered -> PKCE not required.
-    assert verify_pkce("", "", "S256") is True
-
-
-# ---------------------------------------------------------------------------
-# Authorization endpoint validation
-# ---------------------------------------------------------------------------
+    assert verify_pkce("", "", "S256") is False
 
 
 def test_authorize_unknown_client(oidc_app):
@@ -250,9 +231,9 @@ def test_authorize_renders_login_page(oidc_app):
             "client_id": CLIENT_ID,
             "redirect_uri": REDIRECT_URI,
             "scope": "openid profile email groups",
-            "state": "xyz",
-            "nonce": "n-123",
-            "code_challenge": "abc",
+            "state": VALID_STATE,
+            "nonce": VALID_NONCE,
+            "code_challenge": "a" * 43,
             "code_challenge_method": "S256",
         },
     )
@@ -261,12 +242,7 @@ def test_authorize_renders_login_page(oidc_app):
     assert router.store.pending_requests == 1
 
 
-# ---------------------------------------------------------------------------
-# Full code flow (PGP mocked)
-# ---------------------------------------------------------------------------
-
-
-def _start_login(client, router, *, challenge="", method="S256", nonce="n-1"):
+def _start_login(client, router, *, challenge="", method="S256", nonce=VALID_NONCE):
     """Hit /authorize and pull the request_id out of the rendered page."""
     resp = client.get(
         "/oidc/authorize",
@@ -274,9 +250,12 @@ def _start_login(client, router, *, challenge="", method="S256", nonce="n-1"):
             "client_id": CLIENT_ID,
             "redirect_uri": REDIRECT_URI,
             "scope": "openid profile email groups",
-            "state": "the-state",
+            "state": VALID_STATE,
             "nonce": nonce,
-            "code_challenge": challenge,
+            "code_challenge": challenge
+            or base64.urlsafe_b64encode(hashlib.sha256(DEFAULT_VERIFIER.encode()).digest())
+            .rstrip(b"=")
+            .decode(),
             "code_challenge_method": method,
         },
     )
@@ -287,6 +266,10 @@ def _start_login(client, router, *, challenge="", method="S256", nonce="n-1"):
     return rid
 
 
+def _code(response) -> str:
+    return parse_qs(urlsplit(response.json()["redirect_to"]).query)["code"][0]
+
+
 def test_full_authorization_code_pkce_flow(oidc_app, signing_key):
     client, router = oidc_app
 
@@ -295,7 +278,7 @@ def test_full_authorization_code_pkce_flow(oidc_app, signing_key):
         base64.urlsafe_b64encode(hashlib.sha256(verifier.encode()).digest()).rstrip(b"=").decode()
     )
 
-    rid = _start_login(client, router, challenge=challenge, method="S256", nonce="nonce-xyz")
+    rid = _start_login(client, router, challenge=challenge, method="S256")
 
     # Complete PGP login (mocked GOOD-SIG).
     comp = client.post(
@@ -310,8 +293,8 @@ def test_full_authorization_code_pkce_flow(oidc_app, signing_key):
     assert comp.status_code == 200, comp.text
     data = comp.json()
     assert data["redirect_to"].startswith(REDIRECT_URI + "?")
-    assert "state=the-state" in data["redirect_to"]
-    code = data["code"]
+    assert f"state={VALID_STATE}" in data["redirect_to"]
+    code = _code(comp)
 
     # Exchange code for tokens with PKCE verifier.
     tok = client.post(
@@ -340,7 +323,7 @@ def test_full_authorization_code_pkce_flow(oidc_app, signing_key):
     assert claims["sub"] == TEST_FP
     assert claims["iss"] == ISSUER
     assert claims["aud"] == CLIENT_ID
-    assert claims["nonce"] == "nonce-xyz"
+    assert claims["nonce"] == VALID_NONCE
     assert claims["amr"] == ["pgp"]
     assert claims["email"] == "sovereign@capauth.test"
     assert "admins" in claims["groups"]
@@ -365,7 +348,7 @@ def test_token_rejects_bad_pkce(oidc_app):
         base64.urlsafe_b64encode(hashlib.sha256(verifier.encode()).digest()).rstrip(b"=").decode()
     )
     rid = _start_login(client, router, challenge=challenge)
-    code = client.post(
+    comp = client.post(
         "/oidc/complete",
         json={
             "request_id": rid,
@@ -373,7 +356,8 @@ def test_token_rejects_bad_pkce(oidc_app):
             "nonce": "x",
             "nonce_signature": "GOOD-SIG",
         },
-    ).json()["code"]
+    )
+    code = _code(comp)
 
     resp = client.post(
         "/oidc/token",
@@ -383,16 +367,17 @@ def test_token_rejects_bad_pkce(oidc_app):
             "client_id": CLIENT_ID,
             "client_secret": CLIENT_SECRET,
             "code_verifier": "WRONG-VERIFIER",
+            "redirect_uri": REDIRECT_URI,
         },
     )
     assert resp.status_code == 400
-    assert "PKCE" in resp.json()["detail"]
+    assert resp.json()["detail"] == "invalid_grant"
 
 
 def test_token_rejects_bad_client_secret(oidc_app):
     client, router = oidc_app
     rid = _start_login(client, router)
-    code = client.post(
+    comp = client.post(
         "/oidc/complete",
         json={
             "request_id": rid,
@@ -400,7 +385,8 @@ def test_token_rejects_bad_client_secret(oidc_app):
             "nonce": "x",
             "nonce_signature": "GOOD-SIG",
         },
-    ).json()["code"]
+    )
+    code = _code(comp)
     resp = client.post(
         "/oidc/token",
         data={
@@ -416,7 +402,7 @@ def test_token_rejects_bad_client_secret(oidc_app):
 def test_code_is_single_use(oidc_app):
     client, router = oidc_app
     rid = _start_login(client, router)
-    code = client.post(
+    comp = client.post(
         "/oidc/complete",
         json={
             "request_id": rid,
@@ -424,12 +410,15 @@ def test_code_is_single_use(oidc_app):
             "nonce": "x",
             "nonce_signature": "GOOD-SIG",
         },
-    ).json()["code"]
+    )
+    code = _code(comp)
     form = {
         "grant_type": "authorization_code",
         "code": code,
         "client_id": CLIENT_ID,
         "client_secret": CLIENT_SECRET,
+        "redirect_uri": REDIRECT_URI,
+        "code_verifier": DEFAULT_VERIFIER,
     }
     assert client.post("/oidc/token", data=form).status_code == 200
     # Replay must fail.
@@ -465,11 +454,6 @@ def test_userinfo_requires_bearer(oidc_app):
     assert client.get("/oidc/userinfo").status_code == 401
 
 
-# ---------------------------------------------------------------------------
-# Client registry
-# ---------------------------------------------------------------------------
-
-
 def test_client_registry_from_env(monkeypatch):
     monkeypatch.setenv(
         "CAPAUTH_OIDC_CLIENTS_JSON",
@@ -485,7 +469,7 @@ def test_client_registry_from_env(monkeypatch):
     assert not c.secret_matches("x")
 
 
-def test_public_client_accepts_any_secret():
+def test_public_client_is_not_accepted_by_confidential_endpoint():
     c = OIDCClient(client_id="pub", client_secret="", redirect_uris=["https://a/cb"])
-    assert c.secret_matches("") is True
-    assert c.secret_matches("anything") is True
+    assert c.secret_matches("") is False
+    assert c.secret_matches("anything") is False

@@ -50,10 +50,9 @@ class OIDCClient:
         return redirect_uri in self.redirect_uris
 
     def secret_matches(self, candidate: str) -> bool:
-        """Constant-time comparison of a presented client secret."""
+        """Require a configured confidential-client secret and compare it safely."""
         if not self.client_secret:
-            # A public client (PKCE-only). Accept empty/any — PKCE protects it.
-            return True
+            return False
         return hmac.compare_digest(self.client_secret, candidate or "")
 
 

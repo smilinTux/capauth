@@ -6,6 +6,14 @@ All notable changes to `capauth` are documented here. The format is based on
 
 ## [Unreleased]
 
+- Added the CapAuth-owned SKDashboard session authorization contract: an
+  opaque eight-hour maximum refresh family rotates once per use, invalidates
+  the entire family on replay, and can mint only non-persistent signed
+  five-minute `skdashboard` audience tokens with `skdashboard.read` and
+  `skdashboard.events.read`. Enrollment, client scope, stored grant, policy,
+  signer, state, expiry, replay, and revocation failures deny without widening
+  or persisting bearer material (card `95c1a65f`).
+
 - Hardened the CapAuth browser OIDC boundary with mandatory S256, state,
   nonce, exact HTTPS issuer, registered redirect and scope binding, explicit
   approved enrollment, confidential client authentication, and token lifetimes

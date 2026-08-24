@@ -26,6 +26,7 @@ unchanged.
 
 from __future__ import annotations
 
+import base64
 import logging
 import os
 import secrets
@@ -37,7 +38,10 @@ import jwt as pyjwt
 from fastapi import APIRouter, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse
 
+from ... import resolve_capauth_home
 from ...authentik.claims_mapper import preferred_username_fallback
+from ...authz import decide
+from ...tokens import TokenSigningError, export_token, mint_audience_token
 from .clients import ClientRegistry
 from .passkey import PasskeyStore
 from .signing_key import SigningKey
@@ -50,7 +54,11 @@ from .store import (
 
 logger = logging.getLogger("capauth.service.oidc")
 
-SUPPORTED_SCOPES = ["openid", "profile", "email", "groups"]
+SKDASHBOARD_AUDIENCE = "skdashboard"
+SKDASHBOARD_SCOPES = ("skdashboard.read", "skdashboard.events.read")
+SKDASHBOARD_AUTH_SCOPES = frozenset(("openid", *SKDASHBOARD_SCOPES))
+SESSION_POLICY_VERSION = "skdashboard-session-v1"
+SUPPORTED_SCOPES = ["openid", "profile", "email", "groups", *SKDASHBOARD_SCOPES]
 MAX_TOKEN_TTL = 300
 _OPAQUE_MIN_LENGTH = 16
 _RATE_LIMITS = {"authorize": 30, "complete": 10, "token": 30, "logout": 30}
@@ -111,7 +119,7 @@ def discovery_document(issuer: Optional[str] = None) -> dict[str, Any]:
         "jwks_uri": f"{iss}/oidc/jwks.json",
         "response_types_supported": ["code"],
         "response_modes_supported": ["query"],
-        "grant_types_supported": ["authorization_code"],
+        "grant_types_supported": ["authorization_code", "refresh_token"],
         "subject_types_supported": ["public"],
         "id_token_signing_alg_values_supported": ["RS256"],
         "scopes_supported": SUPPORTED_SCOPES,
@@ -683,6 +691,45 @@ def build_oidc_router(
     router.store = store  # type: ignore[attr-defined]
     router.passkeys = passkeys  # type: ignore[attr-defined]
 
+    def _authorize_dashboard_grant(subject: str) -> None:
+        try:
+            decisions = [
+                decide(
+                    subject,
+                    scope,
+                    resource={"audience": SKDASHBOARD_AUDIENCE},
+                    context={"purpose": "oidc_session_refresh"},
+                    base_dir=resolve_capauth_home(),
+                )
+                for scope in SKDASHBOARD_SCOPES
+            ]
+        except Exception:
+            raise HTTPException(status_code=503, detail="policy_unavailable")
+        if not all(decision.allow for decision in decisions):
+            raise HTTPException(status_code=403, detail="grant_not_current")
+
+    def _mint_dashboard_access(subject: str, family_id: str) -> str:
+        _authorize_dashboard_grant(subject)
+        try:
+            token = mint_audience_token(
+                resolve_capauth_home(),
+                subject,
+                SKDASHBOARD_AUDIENCE,
+                list(SKDASHBOARD_SCOPES),
+                ttl_seconds=MAX_TOKEN_TTL,
+                metadata={
+                    "refresh_family": family_id,
+                    "policy_version": SESSION_POLICY_VERSION,
+                },
+                sign=True,
+                store=False,
+            )
+        except TokenSigningError:
+            raise HTTPException(status_code=503, detail="signer_unavailable")
+        except Exception:
+            raise HTTPException(status_code=503, detail="issuer_unavailable")
+        return base64.urlsafe_b64encode(export_token(token).encode("utf-8")).decode("ascii")
+
     def _verify_pgp(
         fingerprint: str,
         nonce: str,
@@ -1092,8 +1139,9 @@ def build_oidc_router(
         client_id: str = Form(default=""),
         client_secret: str = Form(default=""),
         code_verifier: str = Form(default=""),
+        refresh_token: str = Form(default=""),
     ) -> dict[str, Any]:
-        if grant_type != "authorization_code":
+        if grant_type not in {"authorization_code", "refresh_token"}:
             raise HTTPException(status_code=400, detail="unsupported_grant_type")
 
         # Support HTTP Basic client auth (client_secret_basic) as well.
@@ -1112,6 +1160,39 @@ def build_oidc_router(
         client = clients.get(client_id)
         if client is None or not client.secret_matches(client_secret):
             raise HTTPException(status_code=401, detail="invalid_client")
+
+        if grant_type == "refresh_token":
+            if client_id != SKDASHBOARD_AUDIENCE or not refresh_token:
+                raise HTTPException(status_code=400, detail="invalid_grant")
+            try:
+                grant = store.inspect_refresh_token(refresh_token)
+            except InvalidGrantError:
+                raise HTTPException(status_code=400, detail="invalid_grant")
+            except OIDCStateUnavailableError:
+                raise HTTPException(status_code=503, detail="state_unavailable")
+            if (
+                grant.client_id != client_id
+                or grant.audience != SKDASHBOARD_AUDIENCE
+                or grant.scope != " ".join(SKDASHBOARD_SCOPES)
+                or grant.policy_version != SESSION_POLICY_VERSION
+                or not set(SKDASHBOARD_AUTH_SCOPES).issubset(client.scopes)
+                or not _current_identity(grant.subject)
+            ):
+                raise HTTPException(status_code=403, detail="grant_not_current")
+            access_token = _mint_dashboard_access(grant.subject, grant.family_id)
+            try:
+                successor = store.rotate_refresh_token(grant)
+            except InvalidGrantError:
+                raise HTTPException(status_code=400, detail="invalid_grant")
+            except OIDCStateUnavailableError:
+                raise HTTPException(status_code=503, detail="state_unavailable")
+            return {
+                "access_token": access_token,
+                "refresh_token": successor.token,
+                "token_type": "Bearer",
+                "expires_in": MAX_TOKEN_TTL,
+                "scope": successor.scope,
+            }
 
         try:
             record = store.consume_code(code, client_id, redirect_uri, code_verifier)
@@ -1179,6 +1260,38 @@ def build_oidc_router(
             )
         except Exception:
             raise HTTPException(status_code=503, detail="signer_unavailable")
+
+        if client_id == SKDASHBOARD_AUDIENCE:
+            if frozenset(record.scope.split()) != SKDASHBOARD_AUTH_SCOPES:
+                raise HTTPException(status_code=403, detail="grant_not_current")
+            if not _current_identity(sub):
+                raise HTTPException(status_code=403, detail="enrollment_not_current")
+            try:
+                refresh = store.create_refresh_family(
+                    subject=sub,
+                    client_id=client_id,
+                    audience=SKDASHBOARD_AUDIENCE,
+                    scope=" ".join(SKDASHBOARD_SCOPES),
+                    policy_version=SESSION_POLICY_VERSION,
+                )
+            except OIDCStateUnavailableError:
+                raise HTTPException(status_code=503, detail="state_unavailable")
+            try:
+                access_token = _mint_dashboard_access(sub, refresh.family_id)
+            except HTTPException:
+                try:
+                    store.revoke_refresh_family(refresh.token)
+                except OIDCStateUnavailableError:
+                    pass
+                raise
+            return {
+                "access_token": access_token,
+                "id_token": id_token,
+                "refresh_token": refresh.token,
+                "token_type": "Bearer",
+                "expires_in": MAX_TOKEN_TTL,
+                "scope": refresh.scope,
+            }
         try:
             store.register_access_token(jti, sub, client_id, now + access_token_ttl)
         except OIDCStateUnavailableError:
@@ -1210,8 +1323,20 @@ def build_oidc_router(
 
     @router.post("/logout", summary="Revoke the current OIDC access token")
     @router.post("/revoke", summary="Revoke the current OIDC access token")
-    async def revoke(request: Request) -> dict[str, bool]:
+    async def revoke(
+        request: Request,
+        token: str = Form(default=""),
+        token_type_hint: str = Form(default=""),
+    ) -> dict[str, bool]:
         _limit("logout", _source(request))
+        if token:
+            if token_type_hint not in ("", "refresh_token"):
+                raise HTTPException(status_code=400, detail="unsupported_token_type")
+            try:
+                store.revoke_refresh_family(token)
+            except OIDCStateUnavailableError:
+                raise HTTPException(status_code=503, detail="currentness_unavailable")
+            return {"revoked": True}
         auth = request.headers.get("Authorization", "")
         if not auth.startswith("Bearer "):
             raise HTTPException(status_code=401, detail="missing_bearer_token")

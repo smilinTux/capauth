@@ -18,6 +18,7 @@ from ... import resolve_capauth_home
 
 MAX_REQUEST_TTL = 300
 MAX_CODE_TTL = 120
+MAX_REFRESH_FAMILY_TTL = 8 * 60 * 60
 
 
 class OIDCStateUnavailableError(RuntimeError):
@@ -62,6 +63,21 @@ class AuthCode:
     fingerprint: str
     claims: dict[str, Any]
     issued_at: float
+    expires_at: float
+
+
+@dataclass(frozen=True)
+class RefreshGrant:
+    """One fixed, client-bound member of a rotating refresh family."""
+
+    token: str
+    family_id: str
+    generation: int
+    subject: str
+    client_id: str
+    audience: str
+    scope: str
+    policy_version: str
     expires_at: float
 
 
@@ -144,6 +160,21 @@ class AuthCodeStore:
                     );
                     CREATE INDEX IF NOT EXISTS rate_window
                         ON rate_events(bucket, key_hash, occurred_at);
+                    CREATE TABLE IF NOT EXISTS refresh_tokens (
+                        token_hash TEXT PRIMARY KEY,
+                        family_hash TEXT NOT NULL,
+                        generation INTEGER NOT NULL,
+                        subject TEXT NOT NULL,
+                        client_id TEXT NOT NULL,
+                        audience TEXT NOT NULL,
+                        scope TEXT NOT NULL,
+                        policy_version TEXT NOT NULL,
+                        expires_at REAL NOT NULL,
+                        used_at REAL,
+                        revoked_at REAL
+                    );
+                    CREATE INDEX IF NOT EXISTS refresh_family
+                        ON refresh_tokens(family_hash, generation);
                     """
                 )
             os.chmod(self.path, 0o600)
@@ -344,6 +375,172 @@ class AuthCodeStore:
             return cursor.rowcount == 1
         except sqlite3.Error as exc:
             raise OIDCStateUnavailableError("OIDC token revocation failed") from exc
+
+    def create_refresh_family(
+        self,
+        *,
+        subject: str,
+        client_id: str,
+        audience: str,
+        scope: str,
+        policy_version: str,
+        ttl_seconds: int = MAX_REFRESH_FAMILY_TTL,
+    ) -> RefreshGrant:
+        """Create one opaque refresh family without storing its bearer bytes."""
+        if type(ttl_seconds) is not int or not 1 <= ttl_seconds <= MAX_REFRESH_FAMILY_TTL:
+            raise ValueError("refresh family ttl must be between 1 and 28800 seconds")
+        now = time.time()
+        grant = RefreshGrant(
+            token=secrets.token_urlsafe(48),
+            family_id=self._digest(secrets.token_urlsafe(32)),
+            generation=0,
+            subject=subject,
+            client_id=client_id,
+            audience=audience,
+            scope=scope,
+            policy_version=policy_version,
+            expires_at=now + ttl_seconds,
+        )
+        try:
+            with self._connect() as conn:
+                conn.execute(
+                    "INSERT INTO refresh_tokens VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL)",
+                    (
+                        self._digest(grant.token),
+                        grant.family_id,
+                        grant.generation,
+                        subject,
+                        client_id,
+                        audience,
+                        scope,
+                        policy_version,
+                        grant.expires_at,
+                    ),
+                )
+            return grant
+        except sqlite3.Error as exc:
+            raise OIDCStateUnavailableError("OIDC refresh-family write failed") from exc
+
+    def inspect_refresh_token(self, token: str) -> RefreshGrant:
+        """Read a live refresh member for preflight without consuming it."""
+        try:
+            with self._connect() as conn:
+                row = conn.execute(
+                    "SELECT * FROM refresh_tokens WHERE token_hash = ?", (self._digest(token),)
+                ).fetchone()
+                if row is None:
+                    raise InvalidGrantError("unknown_refresh_token")
+                if row["used_at"] is not None:
+                    conn.execute(
+                        "UPDATE refresh_tokens SET revoked_at = ? WHERE family_hash = ?",
+                        (time.time(), row["family_hash"]),
+                    )
+                    conn.commit()
+                    raise InvalidGrantError("replayed_refresh_token")
+                if row["revoked_at"] is not None or row["expires_at"] < time.time():
+                    raise InvalidGrantError("inactive_refresh_token")
+                return RefreshGrant(
+                    token=token,
+                    family_id=row["family_hash"],
+                    generation=row["generation"],
+                    subject=row["subject"],
+                    client_id=row["client_id"],
+                    audience=row["audience"],
+                    scope=row["scope"],
+                    policy_version=row["policy_version"],
+                    expires_at=row["expires_at"],
+                )
+        except InvalidGrantError:
+            raise
+        except sqlite3.Error as exc:
+            raise OIDCStateUnavailableError("OIDC refresh-family read failed") from exc
+
+    def rotate_refresh_token(self, grant: RefreshGrant) -> RefreshGrant:
+        """Atomically consume the exact member and insert its one successor."""
+        now = time.time()
+        next_token = secrets.token_urlsafe(48)
+        try:
+            conn = self._connect()
+            try:
+                conn.execute("BEGIN IMMEDIATE")
+                row = conn.execute(
+                    "SELECT * FROM refresh_tokens WHERE token_hash = ?",
+                    (self._digest(grant.token),),
+                ).fetchone()
+                if (
+                    row is None
+                    or row["used_at"] is not None
+                    or row["revoked_at"] is not None
+                    or row["expires_at"] < now
+                    or row["generation"] != grant.generation
+                    or not hmac.compare_digest(row["client_id"], grant.client_id)
+                ):
+                    if row is not None:
+                        conn.execute(
+                            "UPDATE refresh_tokens SET revoked_at = ? WHERE family_hash = ?",
+                            (now, row["family_hash"]),
+                        )
+                    conn.commit()
+                    raise InvalidGrantError("refresh_rotation_conflict")
+                conn.execute(
+                    "UPDATE refresh_tokens SET used_at = ? WHERE token_hash = ?",
+                    (now, self._digest(grant.token)),
+                )
+                conn.execute(
+                    "INSERT INTO refresh_tokens VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL)",
+                    (
+                        self._digest(next_token),
+                        row["family_hash"],
+                        grant.generation + 1,
+                        grant.subject,
+                        grant.client_id,
+                        grant.audience,
+                        grant.scope,
+                        grant.policy_version,
+                        grant.expires_at,
+                    ),
+                )
+                conn.commit()
+                return RefreshGrant(
+                    token=next_token,
+                    family_id=row["family_hash"],
+                    generation=grant.generation + 1,
+                    subject=grant.subject,
+                    client_id=grant.client_id,
+                    audience=grant.audience,
+                    scope=grant.scope,
+                    policy_version=grant.policy_version,
+                    expires_at=grant.expires_at,
+                )
+            except Exception:
+                if conn.in_transaction:
+                    conn.rollback()
+                raise
+            finally:
+                conn.close()
+        except InvalidGrantError:
+            raise
+        except sqlite3.Error as exc:
+            raise OIDCStateUnavailableError("OIDC refresh-family rotation failed") from exc
+
+    def revoke_refresh_family(self, token: str) -> bool:
+        """Revoke every generation reachable from one opaque family member."""
+        try:
+            with self._connect() as conn:
+                row = conn.execute(
+                    "SELECT family_hash FROM refresh_tokens WHERE token_hash = ?",
+                    (self._digest(token),),
+                ).fetchone()
+                if row is None:
+                    return False
+                cursor = conn.execute(
+                    "UPDATE refresh_tokens SET revoked_at = ? "
+                    "WHERE family_hash = ? AND revoked_at IS NULL",
+                    (time.time(), row["family_hash"]),
+                )
+            return cursor.rowcount > 0
+        except sqlite3.Error as exc:
+            raise OIDCStateUnavailableError("OIDC refresh-family revocation failed") from exc
 
     def enforce_rate_limit(
         self, bucket: str, key: str, *, limit: int, window_seconds: int = 60

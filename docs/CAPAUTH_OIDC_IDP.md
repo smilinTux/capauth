@@ -40,9 +40,9 @@ All under the issuer base URL. Canonical discovery is at
 | GET | `/oidc/jwks.json` | JWKS — the **RSA public key** (`RS256`) used to sign ID tokens. This is the IdP's token-signing key, **separate** from any user's PGP key. |
 | GET | `/oidc/authorize` | Validates `client_id` / `redirect_uri` / `scope` / `state` / PKCE, then renders the **PGP login page**. |
 | POST | `/oidc/complete` | Called by the login page after the user signs. Runs the real PGP verify (reuses `verify_auth_response`), mints an auth code bound to the verified fingerprint + PKCE challenge, and returns the redirect URL with `code` + `state`. |
-| POST | `/oidc/token` | `authorization_code` grant + PKCE verify → signed **ID token** (JWT, RS256: `sub`=PGP fingerprint, `iss`, `aud`=client_id, `nonce`, `amr:["pgp"]`, plus `email`/`name`/`groups` from the claims mapper) + `access_token`. |
+| POST | `/oidc/token` | `authorization_code` grant + PKCE verify to signed ID and access tokens. The exact `skdashboard` client may also rotate a server-side refresh credential into a bounded CapAuth audience token. |
 | GET | `/oidc/userinfo` | `Authorization: Bearer <access_token>` → the verified claims. |
-| POST | `/oidc/logout`, `/oidc/revoke` | Revoke the presented current bearer access token. |
+| POST | `/oidc/logout`, `/oidc/revoke` | Revoke the presented current bearer access token or an opaque refresh family. |
 
 There is also a root alias `GET /.well-known/oidc-idp-configuration` (same
 content) so generic clients that only know the issuer can autodiscover without
@@ -107,6 +107,23 @@ See `src/capauth/service/oidc/clients.example.json`:
 - `redirect_uris` is matched **exactly** (no wildcards).
 - `client_secret` is mandatory. The token endpoint rejects public or
   unconfigured clients even when PKCE is present.
+
+The durable SKDashboard client is the one narrow refresh-enabled profile:
+
+```json
+{
+  "client_id": "skdashboard",
+  "client_secret": "<long-random-secret-reference>",
+  "redirect_uris": ["https://<dashboard-host>/auth/callback"],
+  "name": "SKDashboard",
+  "scopes": ["openid", "skdashboard.read", "skdashboard.events.read"]
+}
+```
+
+Its authorization request must name exactly those three scopes. CapAuth returns
+an ID token, an opaque refresh token, and a canonical signed audience token.
+The refresh token is for the confidential server-side client only and must
+never enter browser storage, URLs, logs, or metrics.
 
 ### 2.4 Other env knobs
 
@@ -216,9 +233,16 @@ client and scope, and enrollment approval on every request. Rate-limit,
 enrollment, signing, configuration, and state outages deny without being
 collapsed into an authentication denial.
 
-- **Refresh tokens.** The browser authorization-code boundary intentionally
-  issues no refresh token. Refresh-family work belongs to its separately gated
-  contract.
+- **SKDashboard refresh family.** Only the exact confidential client
+  `skdashboard` can receive one. Every member is opaque, stored only as a hash,
+  single-use, client-bound, fixed to audience `skdashboard`, fixed to
+  `skdashboard.read skdashboard.events.read`, and bounded by one eight-hour
+  absolute expiry. Rotation never extends that expiry. Reusing a consumed
+  member revokes every generation. Each exchange rechecks approved enrollment,
+  registered client scopes, current stored grants, policy availability, and
+  signer availability before minting a signed non-persistent audience token
+  with a maximum lifetime of 300 seconds. Unknown, unavailable, unauthorized,
+  expired, replayed, malformed, or revoked state denies.
 - **Dynamic client registration.** Clients are static config only (no
   `/register`, no admin CRUD).
 - **Signing-key rotation / multi-key JWKS.** Single key, single `kid`. No

@@ -6,6 +6,11 @@ All notable changes to `capauth` are documented here. The format is based on
 
 ## [Unreleased]
 
+- Added a signed, non-persistent audience-token lifetime in seconds, strictly
+  bounded to 1 through 300 seconds. The new path rejects persistence, unsigned
+  issuance, and conflicting hour-based lifetimes while preserving the existing
+  one-hour default and explicit hour-based API.
+
 - Scoped pull-request and push secret scans to protected `main` plus the exact
   event commit range so unrelated abandoned refs cannot poison clean changes.
   Scheduled and manual runs retain an explicit all-ref scan, and a runnable

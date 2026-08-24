@@ -1634,14 +1634,15 @@ async def phone_signer_page() -> Any:
 async def phone_signer_asset(asset: str) -> Any:
     """Serve a phone-signer PWA static asset (manifest, service worker, js, css).
 
-    Path-traversal guarded: the resolved path must stay within the PWA dir.
+    Path-traversal guarded: the resolved path must stay within its asset root.
     """
-    target = (_PHONE_SIGNER_DIR / asset).resolve()
+    asset_root = _PHONE_SIGNER_DIR.resolve()
+    target = (asset_root / asset).resolve()
     if not target.is_file():
-        packaged = Path(__file__).parent / "oidc" / "static" / "bunker" / asset
-        target = packaged.resolve()
+        asset_root = (Path(__file__).parent / "oidc" / "static" / "bunker").resolve()
+        target = (asset_root / asset).resolve()
     try:
-        target.relative_to(_PHONE_SIGNER_DIR.resolve())
+        target.relative_to(asset_root)
     except ValueError:
         raise HTTPException(status_code=403, detail="forbidden")
     if not target.is_file():

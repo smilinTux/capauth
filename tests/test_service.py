@@ -189,6 +189,44 @@ class TestServiceEndpoints:
         assert "capauth_pgp" in data["token_endpoint_auth_methods_supported"]
         assert "openid" in data["scopes_supported"]
 
+    def test_packaged_bunker_assets_are_served(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Packaged bunker assets remain reachable when the source PWA is absent."""
+        import capauth.service.app as svc_app
+
+        monkeypatch.setattr(svc_app, "_PHONE_SIGNER_DIR", tmp_path / "missing-phone-signer")
+        for asset in (
+            "vendor/openpgp.min.js",
+            "lib/bunker-e2e.js",
+            "lib/keyvault.js",
+        ):
+            response = self.client.get(f"/bunker/{asset}")
+            assert response.status_code == 200
+            assert response.content
+
+    def test_bunker_asset_traversal_is_rejected(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Packaged and source asset roots reject path traversal."""
+        import asyncio
+
+        import capauth.service.app as svc_app
+        from fastapi import HTTPException
+
+        source_root = tmp_path / "phone-signer"
+        source_root.mkdir()
+        (tmp_path / "outside.txt").write_text("not an asset")
+        monkeypatch.setattr(svc_app, "_PHONE_SIGNER_DIR", source_root)
+        with pytest.raises(HTTPException) as raised:
+            asyncio.run(svc_app.phone_signer_asset("../outside.txt"))
+        assert raised.value.status_code == 403
+
+        monkeypatch.setattr(svc_app, "_PHONE_SIGNER_DIR", tmp_path / "missing-phone-signer")
+        with pytest.raises(HTTPException) as raised:
+            asyncio.run(svc_app.phone_signer_asset("../../../pyproject.toml"))
+        assert raised.value.status_code == 403
+
     def test_oidc_discovery_forgejo_required_fields(self) -> None:
         """OIDC discovery document should satisfy Forgejo's autodiscovery requirements."""
         resp = self.client.get("/.well-known/openid-configuration")

@@ -6,6 +6,8 @@ All notable changes to `capauth` are documented here. The format is based on
 
 ## [Unreleased]
 
+- Fixed packaged bunker asset fallback to use its own path containment root while preserving local PWA traversal protection (card `46ad28a5`).
+
 - Package the CapAuth bunker login assets in the installed OIDC artifact so local-device signing works after wheel installation.
 
 - Added the CapAuth-owned SKDashboard session authorization contract: an

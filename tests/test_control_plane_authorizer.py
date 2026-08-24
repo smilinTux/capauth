@@ -19,6 +19,7 @@ from capauth.control_plane import (
 )
 from capauth.control_plane_authorizer import (
     MAX_CONTROL_PLANE_BEARER_BYTES,
+    ControlPlaneCurrentnessVerifier,
     ControlPlaneDecisionAuthorizer,
     ControlPlaneInvocationV1,
     SanitizedControlPlaneDecisionV1,
@@ -258,7 +259,294 @@ def test_canonical_direct_bearer_returns_sanitized_attributable_allow() -> None:
     assert rig.replay.reserve_calls == 1
 
 
-def test_canonical_delegated_chain_returns_the_agent_context() -> None:
+def test_request_local_currentness_verifier_requires_ordered_pre_and_post_checks() -> None:
+    rig = Rig()
+    result, verifier = rig.authorizer().authorize_with_currentness(rig.bearer(), rig.invocation())
+    assert result.allow is True
+    assert result.context is not None
+    assert isinstance(verifier, ControlPlaneCurrentnessVerifier)
+
+    assert verifier.check_before_owner_read(result.context) is DecisionState.ALLOW
+    assert verifier.check_after_owner_read(result.context) is DecisionState.ALLOW
+    assert verifier.check_after_owner_read(result.context) is DecisionState.DENY
+    assert rig.capability_authorizer._receipt_expiries == {}
+    assert rig.signer.verify_calls == 1
+    assert rig.replay.reserve_calls == 1
+
+
+def test_currentness_verifier_rejects_revoked_existing_context() -> None:
+    rig = Rig()
+    result, verifier = rig.authorizer().authorize_with_currentness(rig.bearer(), rig.invocation())
+    assert result.context is not None
+    assert verifier is not None
+    digest = result.context.capauth_decision.credential_digest
+    assert digest is not None
+    rig.revocations.revoke(digest)
+
+    assert verifier.check_before_owner_read(result.context) is DecisionState.DENY
+    assert rig.capability_authorizer._receipt_expiries == {}
+
+
+def test_currentness_verifier_preserves_backend_unavailable() -> None:
+    rig = Rig()
+    result, verifier = rig.authorizer().authorize_with_currentness(rig.bearer(), rig.invocation())
+    assert result.context is not None
+    assert verifier is not None
+
+    def unavailable(_digests):
+        raise RuntimeError("SECRET BACKEND DETAIL")
+
+    rig.revocations.snapshot = unavailable
+    assert verifier.check_before_owner_read(result.context) is DecisionState.UNAVAILABLE
+    assert rig.capability_authorizer._receipt_expiries == {}
+
+
+def test_currentness_verifier_rejects_copy_wrong_order_and_serialization() -> None:
+    rig = Rig()
+    result, verifier = rig.authorizer().authorize_with_currentness(rig.bearer(), rig.invocation())
+    assert result.context is not None
+    assert verifier is not None
+    copied_context = result.context.model_copy()
+    assert copied_context == result.context and copied_context is not result.context
+    with pytest.raises(AttributeError, match="immutable"):
+        verifier._context = copied_context
+    assert verifier.check_before_owner_read(copied_context) is DecisionState.DENY
+    assert verifier.check_before_owner_read(result.context) is DecisionState.DENY
+    assert repr(verifier) == "<opaque control-plane currentness verifier>"
+    for operation in (
+        lambda: copy.copy(verifier),
+        lambda: copy.deepcopy(verifier),
+        lambda: pickle.dumps(verifier),
+    ):
+        with pytest.raises(TypeError):
+            operation()
+
+    result, verifier = rig.authorizer().authorize_with_currentness(
+        rig.bearer(), rig.invocation(correlation_id="request-2")
+    )
+    assert result.context is not None
+    assert verifier is not None
+    assert verifier.check_after_owner_read(result.context) is DecisionState.DENY
+    assert verifier.check_before_owner_read(result.context) is DecisionState.DENY
+    assert rig.capability_authorizer._receipt_expiries == {}
+
+
+def test_currentness_verifier_rejects_direct_permissive_construction() -> None:
+    from capauth.control_plane_authorizer import _CURRENTNESS_FACTORY
+
+    class PermissiveAuthorizer:
+        def revalidate_current(self, *_args):
+            return _args[2]
+
+        def discard_currentness_receipts(self, _receipts):
+            return None
+
+    rig = Rig()
+    with pytest.raises(TypeError, match="authorizer-issued"):
+        ControlPlaneCurrentnessVerifier(
+            _CURRENTNESS_FACTORY,
+            issuer=rig.authorizer(),
+            issue_nonce=b"n" * 32,
+            issue_mac=b"m" * 32,
+            authorizer=PermissiveAuthorizer(),
+            presented=object(),
+            request=object(),
+            prior=object(),
+            context=object(),
+            receipts=(object(), object()),
+        )
+
+
+def test_currentness_factory_and_object_setattr_cannot_forge_issuance() -> None:
+    from capauth.control_plane_authorizer import _CURRENTNESS_FACTORY
+
+    rig = Rig()
+    issuer = rig.authorizer()
+    result, verifier = issuer.authorize_with_currentness(rig.bearer(), rig.invocation())
+    assert result.context is not None
+    assert verifier is not None
+
+    copied = result.context.model_copy()
+    object.__setattr__(verifier, "_context", copied)
+    assert verifier.check_before_owner_read(copied) is DecisionState.DENY
+
+    result, genuine = issuer.authorize_with_currentness(
+        rig.bearer(), rig.invocation(correlation_id="request-2")
+    )
+    assert result.context is not None
+    assert genuine is not None
+    forged = ControlPlaneCurrentnessVerifier(
+        _CURRENTNESS_FACTORY,
+        issuer=issuer,
+        issue_nonce=b"n" * 32,
+        issue_mac=b"m" * 32,
+        authorizer=object.__getattribute__(genuine, "_authorizer"),
+        presented=object.__getattribute__(genuine, "_presented"),
+        request=object.__getattribute__(genuine, "_request"),
+        prior=object.__getattribute__(genuine, "_prior"),
+        context=result.context,
+        receipts=object.__getattribute__(genuine, "_receipts"),
+    )
+    assert forged.check_before_owner_read(result.context) is DecisionState.DENY
+    assert genuine.check_before_owner_read(result.context) is DecisionState.ALLOW
+    assert genuine.check_after_owner_read(result.context) is DecisionState.ALLOW
+    assert rig.capability_authorizer._receipt_expiries == {}
+
+
+def test_exact_private_field_clone_cannot_consume_genuine_verifier() -> None:
+    from capauth.control_plane_authorizer import _CURRENTNESS_FACTORY
+
+    rig = Rig()
+    result, genuine = rig.authorizer().authorize_with_currentness(rig.bearer(), rig.invocation())
+    assert result.context is not None
+    assert genuine is not None
+    clone = ControlPlaneCurrentnessVerifier(
+        _CURRENTNESS_FACTORY,
+        issuer=object.__getattribute__(genuine, "_issuer"),
+        issue_nonce=object.__getattribute__(genuine, "_issue_nonce"),
+        issue_mac=object.__getattribute__(genuine, "_issue_mac"),
+        authorizer=object.__getattribute__(genuine, "_authorizer"),
+        presented=object.__getattribute__(genuine, "_presented"),
+        request=object.__getattribute__(genuine, "_request"),
+        prior=object.__getattribute__(genuine, "_prior"),
+        context=result.context,
+        receipts=object.__getattribute__(genuine, "_receipts"),
+    )
+
+    assert clone.check_before_owner_read(result.context) is DecisionState.DENY
+    assert genuine.check_before_owner_read(result.context) is DecisionState.ALLOW
+    assert genuine.check_after_owner_read(result.context) is DecisionState.ALLOW
+    assert rig.capability_authorizer._receipt_expiries == {}
+
+
+def test_malformed_same_object_context_denies_and_releases_private_state() -> None:
+    rig = Rig()
+    issuer = rig.authorizer()
+    result, verifier = issuer.authorize_with_currentness(rig.bearer(), rig.invocation())
+    assert result.context is not None
+    assert verifier is not None
+
+    object.__setattr__(result.context, "binding", object())
+
+    assert verifier.check_before_owner_read(result.context) is DecisionState.DENY
+    assert rig.capability_authorizer._receipt_expiries == {}
+    assert issuer._verifier_states == {}
+    assert object.__getattribute__(verifier, "_presented") is None
+
+
+def test_currentness_verifier_detects_principal_change_and_expiry() -> None:
+    changed = Rig()
+    result, verifier = changed.authorizer().authorize_with_currentness(
+        changed.bearer(), changed.invocation()
+    )
+    assert result.context is not None
+    assert verifier is not None
+    changed.principals.set(changed.principal)
+    assert verifier.check_before_owner_read(result.context) is DecisionState.DENY
+
+    expired = Rig()
+    result, verifier = expired.authorizer().authorize_with_currentness(
+        expired.bearer(), expired.invocation()
+    )
+    assert result.context is not None
+    assert verifier is not None
+    expired.clock.value = result.context.expires_at
+    assert verifier.check_before_owner_read(result.context) is DecisionState.DENY
+
+
+def test_currentness_verifier_concurrent_precheck_allows_once_then_closes() -> None:
+    rig = Rig()
+    result, verifier = rig.authorizer().authorize_with_currentness(rig.bearer(), rig.invocation())
+    assert result.context is not None
+    assert verifier is not None
+    barrier = Barrier(2)
+    outcomes = []
+
+    def check() -> None:
+        barrier.wait()
+        outcomes.append(verifier.check_before_owner_read(result.context))
+
+    threads = [Thread(target=check) for _ in range(2)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+    assert outcomes.count(DecisionState.ALLOW) == 1
+    assert outcomes.count(DecisionState.DENY) == 1
+    assert verifier.check_after_owner_read(result.context) is DecisionState.DENY
+
+
+@pytest.mark.parametrize("change", ("revoke", "expire"))
+def test_postcheck_withholds_owner_output_after_authority_changes(change) -> None:
+    rig = Rig()
+    result, verifier = rig.authorizer().authorize_with_currentness(rig.bearer(), rig.invocation())
+    assert result.context is not None
+    assert verifier is not None
+    assert verifier.check_before_owner_read(result.context) is DecisionState.ALLOW
+    private_owner_output = {"protected": "SECRET OWNER OUTPUT"}
+    if change == "revoke":
+        digest = result.context.capauth_decision.credential_digest
+        assert digest is not None
+        rig.revocations.revoke(digest)
+    else:
+        rig.clock.value = result.context.expires_at
+
+    state = verifier.check_after_owner_read(result.context)
+    released_output = private_owner_output if state is DecisionState.ALLOW else None
+
+    assert state is DecisionState.DENY
+    assert released_output is None
+    assert rig.capability_authorizer._receipt_expiries == {}
+
+
+def test_precheck_backend_failure_discards_active_and_remaining_receipts() -> None:
+    rig = Rig()
+    result, verifier = rig.authorizer().authorize_with_currentness(rig.bearer(), rig.invocation())
+    assert result.context is not None
+    assert verifier is not None
+
+    def unavailable_clock():
+        raise RuntimeError("SECRET CLOCK DETAIL")
+
+    rig.capability_authorizer._clock = unavailable_clock
+    assert verifier.check_before_owner_read(result.context) is DecisionState.UNAVAILABLE
+    assert rig.capability_authorizer._receipt_expiries == {}
+
+
+def test_owner_denial_and_nonce_collision_leave_no_currentness_receipts(monkeypatch) -> None:
+    denied = Rig()
+    result, verifier = denied.authorizer(
+        OwnerPolicy((_owner(denied.binding, DecisionState.DENY),))
+    ).authorize_with_currentness(denied.bearer(), denied.invocation())
+    assert result.allow is False and verifier is None
+    assert denied.capability_authorizer._receipt_expiries == {}
+
+    collision = Rig()
+    monkeypatch.setattr("capauth.delegated.secrets.token_bytes", lambda _count: b"x" * 32)
+    result, verifier = collision.authorizer().authorize_with_currentness(
+        collision.bearer(), collision.invocation()
+    )
+    assert result.state is DecisionState.UNAVAILABLE
+    assert verifier is None
+    assert collision.capability_authorizer._receipt_expiries == {}
+
+
+@pytest.mark.parametrize("seeded,allowed", ((1022, True), (1023, False)))
+def test_currentness_receipt_capacity_boundary_is_atomic(seeded, allowed) -> None:
+    rig = Rig()
+    rig.capability_authorizer._receipt_expiries = {
+        index.to_bytes(32, "big"): NOW + timedelta(minutes=1) for index in range(seeded)
+    }
+    result, verifier = rig.authorizer().authorize_with_currentness(rig.bearer(), rig.invocation())
+    assert result.allow is allowed
+    assert (verifier is not None) is allowed
+    if verifier is not None:
+        assert len(rig.capability_authorizer._receipt_expiries) == seeded + 2
+        verifier.close()
+    assert len(rig.capability_authorizer._receipt_expiries) == seeded
+
+
+def test_delegated_currentness_detects_ancestor_revocation() -> None:
     clock = Clock()
     signer = RegistrySigner()
     human = Principal(principal_id="human-parent", subject="parent@test", kind="human")
@@ -320,16 +608,23 @@ def test_canonical_delegated_chain_returns_the_agent_context() -> None:
         correlation_id="request-agent",
         boundary=RequestBoundary(client_kind=ClientKind.AGENT),
     )
-    result = ControlPlaneDecisionAuthorizer(
+    control_plane_authorizer = ControlPlaneDecisionAuthorizer(
         capability_authorizer=authorizer,
         owner_policy=OwnerPolicy(),
         allowed_origins=frozenset({ORIGIN}),
         clock=clock,
-    ).authorize(export_control_plane_bearer(delegated), invocation)
+    )
+    result, verifier = control_plane_authorizer.authorize_with_currentness(
+        export_control_plane_bearer(delegated), invocation
+    )
     assert result.allow is True
+    assert verifier is not None
     assert result.context.binding.principal == agent
     assert result.context.binding.agent_id == agent.principal_id
     assert result.context.capauth_decision.delegation_depth == 1
+    ancestor = parse_presented_token(delegated.credentials_for_verification()[0])
+    revocations.revoke(ancestor.credential_digest)
+    assert verifier.check_before_owner_read(result.context) is DecisionState.DENY
 
 
 def test_agent_constraint_must_name_the_signed_agent_principal() -> None:

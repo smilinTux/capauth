@@ -32,6 +32,7 @@ from .control_plane import (
 from .control_plane_authorizer import (
     MAX_CONTROL_PLANE_BEARER_BYTES,
     ControlPlaneAuthorizationResultV1,
+    ControlPlaneCurrentnessVerifier,
     ControlPlaneDecisionAuthorizer,
     ControlPlaneInvocationV1,
     OwnerPolicyProvider,
@@ -188,6 +189,7 @@ __all__ = [
     "MAX_CONTROL_PLANE_BEARER_BYTES",
     "ClientKind",
     "ControlPlaneAuthorizationResultV1",
+    "ControlPlaneCurrentnessVerifier",
     "ControlPlaneBinding",
     "ControlPlaneDecision",
     "ControlPlaneDecisionAuthorizer",

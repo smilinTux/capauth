@@ -6,6 +6,13 @@ All notable changes to `capauth` are documented here. The format is based on
 
 ## [Unreleased]
 
+- Added an opaque two-phase control-plane currentness verifier for protected
+  downstream owner reads. It binds two ordered request-local checks to the exact
+  authorizer-issued context, preserves deny versus unavailable, detects current
+  issuer, principal, ancestor and leaf revocation, and expiry changes, and
+  releases all credential-bearing state on completion or failure (card
+  `c7981a0a`).
+
 - Added a signed, non-persistent audience-token lifetime in seconds, strictly
   bounded to 1 through 300 seconds. The new path rejects persistence, unsigned
   issuance, and conflicting hour-based lifetimes while preserving the existing

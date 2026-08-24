@@ -40,6 +40,7 @@ MAX_CREDENTIAL_BYTES = 256 * 1024
 MAX_AUTHORIZATION_BYTES = (MAX_DELEGATION_DEPTH + 1) * MAX_CREDENTIAL_BYTES + 4096
 MAX_SIGNATURE_LENGTH = 128 * 1024
 MAX_CURRENTNESS_RECEIPTS = 1024
+MAX_CURRENTNESS_RECEIPTS_PER_AUTHORIZATION = 2
 METADATA_KEY = "capauth_delegated_capability"
 VERIFIER_POLICY_VERSION = "capauth-delegated-authz/v1"
 
@@ -1141,35 +1142,47 @@ class CapabilityAuthorizer:
         """Authorize once and mint an opaque proof for one later currentness check."""
 
         decision = self.authorize(presented, request)
-        if presented is None:
-            raise AuthorizationReceiptUnavailableError
-        try:
-            leaf = parse_presented_token(presented.credentials_for_verification()[-1])
-            expiry = _require_utc(leaf.token.payload.expires_at, "expires_at")
-            now = _require_utc(self._clock(), "authorizer clock")
-            nonce = secrets.token_bytes(32)
-        except Exception:
-            raise AuthorizationReceiptUnavailableError from None
-        try:
-            mac = self._receipt_mac(nonce, request, decision)
-        except AuthorizationReceiptError:
-            raise AuthorizationReceiptUnavailableError from None
+        receipts = self._mint_currentness_receipts(presented, request, decision, count=1)
+        return decision, receipts[0]
+
+    def revalidate_current_with_receipts(
+        self,
+        presented: PresentedCapability,
+        request: AuthorizationRequest,
+        prior: AuthorizationDecision,
+        receipt: AuthorizationCurrentnessReceipt,
+        *,
+        count: int,
+    ) -> tuple[AuthorizationDecision, tuple[AuthorizationCurrentnessReceipt, ...]]:
+        """Revalidate one real allow and mint bounded proofs for downstream checks."""
+
+        decision = self.revalidate_current(presented, request, prior, receipt)
+        receipts = self._mint_currentness_receipts(
+            presented,
+            request,
+            decision,
+            count=count,
+        )
+        return decision, receipts
+
+    def discard_currentness_receipts(
+        self,
+        receipts: tuple[AuthorizationCurrentnessReceipt, ...],
+    ) -> None:
+        """Invalidate request-local receipts that will not be used."""
+
+        nonces = []
+        for receipt in receipts:
+            if not isinstance(receipt, AuthorizationCurrentnessReceipt):
+                continue
+            try:
+                nonce, _mac = receipt._proof()
+            except Exception:
+                continue
+            nonces.append(nonce)
         with self._receipt_lock:
-            self._receipt_expiries = {
-                value: deadline
-                for value, deadline in self._receipt_expiries.items()
-                if deadline > now
-            }
-            if len(self._receipt_expiries) >= MAX_CURRENTNESS_RECEIPTS:
-                raise AuthorizationReceiptUnavailableError
-            while nonce in self._receipt_expiries:
-                try:
-                    nonce = secrets.token_bytes(32)
-                    mac = self._receipt_mac(nonce, request, decision)
-                except Exception:
-                    raise AuthorizationReceiptUnavailableError from None
-            self._receipt_expiries[nonce] = expiry
-        return decision, AuthorizationCurrentnessReceipt(nonce, mac)
+            for nonce in nonces:
+                self._receipt_expiries.pop(nonce, None)
 
     def revalidate_current(
         self,
@@ -1185,9 +1198,12 @@ class CapabilityAuthorizer:
         try:
             nonce, actual_mac = receipt._proof()
             expected_mac = self._receipt_mac(nonce, request, prior)
-            now = _require_utc(self._clock(), "authorizer clock")
         except Exception:
             raise AuthorizationReceiptError from None
+        try:
+            now = _require_utc(self._clock(), "authorizer clock")
+        except Exception:
+            raise AuthorizationReceiptUnavailableError from None
         with self._receipt_lock:
             registered_expiry = self._receipt_expiries.get(nonce)
             self._receipt_expiries = {
@@ -1404,6 +1420,50 @@ class CapabilityAuthorizer:
         except Exception:
             raise AuthorizationReceiptError from None
         return hmac.new(self._receipt_key, encoded, hashlib.sha256).digest()
+
+    def _mint_currentness_receipts(
+        self,
+        presented: PresentedCapability | None,
+        request: AuthorizationRequest,
+        decision: AuthorizationDecision,
+        *,
+        count: int,
+    ) -> tuple[AuthorizationCurrentnessReceipt, ...]:
+        if type(count) is not int or not 1 <= count <= MAX_CURRENTNESS_RECEIPTS_PER_AUTHORIZATION:
+            raise AuthorizationReceiptUnavailableError
+        if presented is None:
+            raise AuthorizationReceiptUnavailableError
+        try:
+            leaf = parse_presented_token(presented.credentials_for_verification()[-1])
+            expiry = _require_utc(leaf.token.payload.expires_at, "expires_at")
+            now = _require_utc(self._clock(), "authorizer clock")
+        except Exception:
+            raise AuthorizationReceiptUnavailableError from None
+        issued: dict[bytes, tuple[datetime, bytes]] = {}
+        with self._receipt_lock:
+            self._receipt_expiries = {
+                value: deadline
+                for value, deadline in self._receipt_expiries.items()
+                if deadline > now
+            }
+            if len(self._receipt_expiries) + count > MAX_CURRENTNESS_RECEIPTS:
+                raise AuthorizationReceiptUnavailableError
+            for _attempt in range(16):
+                if len(issued) == count:
+                    break
+                try:
+                    nonce = secrets.token_bytes(32)
+                    if nonce in self._receipt_expiries or nonce in issued:
+                        continue
+                    issued[nonce] = (expiry, self._receipt_mac(nonce, request, decision))
+                except Exception:
+                    raise AuthorizationReceiptUnavailableError from None
+            if len(issued) != count:
+                raise AuthorizationReceiptUnavailableError
+            self._receipt_expiries.update({nonce: value[0] for nonce, value in issued.items()})
+        return tuple(
+            AuthorizationCurrentnessReceipt(nonce, value[1]) for nonce, value in issued.items()
+        )
 
     def _refresh_current_state(
         self,

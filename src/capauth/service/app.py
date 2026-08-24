@@ -30,6 +30,7 @@ import jwt
 from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from .. import integration as _integration
@@ -113,6 +114,11 @@ app.add_middleware(
 # ---------------------------------------------------------------------------
 _oidc_router = build_oidc_router()
 app.include_router(_oidc_router, prefix="/oidc")
+app.mount(
+    "/bunker",
+    StaticFiles(directory=Path(__file__).with_name("oidc") / "static" / "bunker"),
+    name="bunker-assets",
+)
 
 
 @app.get("/.well-known/oidc-idp-configuration")

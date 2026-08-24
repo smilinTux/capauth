@@ -1637,6 +1637,9 @@ async def phone_signer_asset(asset: str) -> Any:
     Path-traversal guarded: the resolved path must stay within the PWA dir.
     """
     target = (_PHONE_SIGNER_DIR / asset).resolve()
+    if not target.is_file():
+        packaged = Path(__file__).parent / "oidc" / "static" / "bunker" / asset
+        target = packaged.resolve()
     try:
         target.relative_to(_PHONE_SIGNER_DIR.resolve())
     except ValueError:

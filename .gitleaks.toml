@@ -1,0 +1,6 @@
+# The OpenPGP.js distribution is vendored third-party code.  Its serializer
+# contains the literal PGP private-key armor marker as protocol data; it does
+# not contain a private key.  Keep the exception limited to this immutable
+# vendor artifact.  All application and configuration files remain scanned.
+[allowlist]
+  paths = ['''src/capauth/service/oidc/static/bunker/vendor/openpgp\.min\.js''']

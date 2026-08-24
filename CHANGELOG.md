@@ -6,6 +6,8 @@ All notable changes to `capauth` are documented here. The format is based on
 
 ## [Unreleased]
 
+- Package the CapAuth bunker login assets in the installed OIDC artifact so local-device signing works after wheel installation.
+
 - Added the CapAuth-owned SKDashboard session authorization contract: an
   opaque eight-hour maximum refresh family rotates once per use, invalidates
   the entire family on replay, and can mint only non-persistent signed

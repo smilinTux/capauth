@@ -30,7 +30,6 @@ import jwt
 from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse
-from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from .. import integration as _integration
@@ -114,11 +113,6 @@ app.add_middleware(
 # ---------------------------------------------------------------------------
 _oidc_router = build_oidc_router()
 app.include_router(_oidc_router, prefix="/oidc")
-app.mount(
-    "/bunker",
-    StaticFiles(directory=Path(__file__).with_name("oidc") / "static" / "bunker"),
-    name="bunker-assets",
-)
 
 
 @app.get("/.well-known/oidc-idp-configuration")
@@ -1643,6 +1637,9 @@ async def phone_signer_asset(asset: str) -> Any:
     Path-traversal guarded: the resolved path must stay within the PWA dir.
     """
     target = (_PHONE_SIGNER_DIR / asset).resolve()
+    if not target.is_file():
+        packaged = Path(__file__).parent / "oidc" / "static" / "bunker" / asset
+        target = packaged.resolve()
     try:
         target.relative_to(_PHONE_SIGNER_DIR.resolve())
     except ValueError:

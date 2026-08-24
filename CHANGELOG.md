@@ -6,6 +6,9 @@ All notable changes to `capauth` are documented here. The format is based on
 
 ## [Unreleased]
 
+- Fail closed when passkey credentials or updated counters cannot be loaded or
+  atomically persisted, and require an explicit durable service data directory.
+
 - Make OIDC login lead with passkeys and show the exact expiring PGP payload,
   truthful inline and detached GPG commands, and existing local and QR options.
 

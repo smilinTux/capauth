@@ -43,7 +43,7 @@ from ...authentik.claims_mapper import preferred_username_fallback
 from ...authz import decide
 from ...tokens import TokenSigningError, export_token, mint_audience_token
 from .clients import ClientRegistry
-from .passkey import PasskeyStore
+from .passkey import PasskeyStore, PasskeyStoreUnavailableError
 from .signing_key import SigningKey
 from .store import (
     AuthCodeStore,
@@ -1068,6 +1068,8 @@ def build_oidc_router(
             raise HTTPException(status_code=400, detail="ticket + credential required")
         try:
             fp, cid = passkeys.complete_registration(ticket, credential)
+        except PasskeyStoreUnavailableError:
+            raise HTTPException(status_code=503, detail="passkey_state_unavailable")
         except Exception as exc:
             raise HTTPException(status_code=400, detail=f"registration_failed: {exc}")
         return {"ok": True, "fingerprint": fp, "credential_id": cid}
@@ -1100,6 +1102,8 @@ def build_oidc_router(
             raise HTTPException(status_code=400, detail="credential required")
         try:
             fingerprint = passkeys.complete_authentication(request_id, credential)
+        except PasskeyStoreUnavailableError:
+            raise HTTPException(status_code=503, detail="passkey_state_unavailable")
         except Exception as exc:
             raise HTTPException(status_code=401, detail=f"passkey_verification_failed: {exc}")
 

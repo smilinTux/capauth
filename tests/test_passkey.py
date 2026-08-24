@@ -8,13 +8,20 @@ challenge binding are all exercised without a browser.
 from __future__ import annotations
 
 import base64
+import json
+import stat
+from unittest.mock import patch
 
 import pytest
 
 soft = pytest.importorskip("soft_webauthn")
 from soft_webauthn import SoftWebauthnDevice  # noqa: E402
 
-from capauth.service.oidc.passkey import PasskeyStore, rp_origin_and_id  # noqa: E402
+from capauth.service.oidc.passkey import (  # noqa: E402
+    PasskeyStore,
+    PasskeyStoreUnavailableError,
+    rp_origin_and_id,
+)
 
 FP = "A1B2C3D4E5F6A7B8C9D0A1B2C3D4E5F6A7B8C9D0"
 
@@ -102,6 +109,7 @@ def test_full_register_then_authenticate(env, tmp_path):
 
     # persisted across a reload
     assert PasskeyStore(data_dir=str(tmp_path)).has_any(FP)
+    assert stat.S_IMODE((tmp_path / "passkeys.json").stat().st_mode) == 0o600
 
     # --- authenticate (with a fingerprint hint → allowCredentials) ---
     req_options = store.begin_authentication("req-1", FP)
@@ -137,3 +145,44 @@ def test_expired_or_unknown_ticket(env, tmp_path):
     store = PasskeyStore(data_dir=str(tmp_path))
     with pytest.raises(ValueError):
         store.complete_registration("nope", {"id": "x"})
+
+
+def test_registration_fails_closed_and_rolls_back_when_save_fails(env, tmp_path):
+    origin, _ = rp_origin_and_id()
+    store = PasskeyStore(data_dir=str(tmp_path))
+    device = SoftWebauthnDevice()
+    ticket, options = store.begin_registration(FP)
+    attestation = _att_json(device.create(_create_input(options), origin))
+
+    with patch("os.replace", side_effect=OSError("read-only filesystem")):
+        with pytest.raises(PasskeyStoreUnavailableError):
+            store.complete_registration(ticket, attestation)
+
+    assert not store.has_any(FP)
+    assert not (tmp_path / "passkeys.json").exists()
+
+
+@pytest.mark.parametrize("payload", ["not-json", "[]"])
+def test_malformed_passkey_state_is_unavailable(tmp_path, payload):
+    (tmp_path / "passkeys.json").write_text(payload, encoding="utf-8")
+
+    with pytest.raises(PasskeyStoreUnavailableError):
+        PasskeyStore(data_dir=str(tmp_path))
+
+
+def test_authentication_rolls_back_counter_when_save_fails(env, tmp_path):
+    origin, _ = rp_origin_and_id()
+    store = PasskeyStore(data_dir=str(tmp_path))
+    device = SoftWebauthnDevice()
+    ticket, options = store.begin_registration(FP)
+    store.complete_registration(ticket, _att_json(device.create(_create_input(options), origin)))
+    before = json.loads((tmp_path / "passkeys.json").read_text(encoding="utf-8"))
+
+    request_options = store.begin_authentication("req-save-fail", FP)
+    assertion = _assert_json(device.get(_get_input(request_options), origin))
+    with patch("os.replace", side_effect=OSError("read-only filesystem")):
+        with pytest.raises(PasskeyStoreUnavailableError):
+            store.complete_authentication("req-save-fail", assertion)
+
+    credential_id = next(iter(before))
+    assert store._creds[credential_id]["sign_count"] == before[credential_id]["sign_count"]

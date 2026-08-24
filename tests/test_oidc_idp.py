@@ -23,6 +23,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from capauth.service.oidc.clients import ClientRegistry, OIDCClient
+from capauth.service.oidc.passkey import PasskeyStoreUnavailableError
 from capauth.service.oidc.provider import build_oidc_router, discovery_document
 from capauth.service.oidc.signing_key import SigningKey
 from capauth.service.oidc.store import AuthCodeStore, verify_pkce
@@ -270,6 +271,22 @@ def test_login_page_documents_exact_signing_contract(oidc_app):
     assert "capauth sign --nonce" not in resp.text
     assert "Sign on this device (key in your bunker)" in resp.text
     assert "Sign from another device (QR)" in resp.text
+
+
+def test_passkey_registration_persistence_failure_is_unavailable(oidc_app, monkeypatch):
+    client, router = oidc_app
+
+    def unavailable(_ticket, _credential):
+        raise PasskeyStoreUnavailableError("disk unavailable")
+
+    monkeypatch.setattr(router.passkeys, "complete_registration", unavailable)
+    response = client.post(
+        "/oidc/passkey/register/complete",
+        json={"ticket": "valid-ticket", "credential": {"id": "credential"}},
+    )
+
+    assert response.status_code == 503
+    assert response.json() == {"detail": "passkey_state_unavailable"}
 
 
 def _start_login(client, router, *, challenge="", method="S256", nonce=VALID_NONCE):

@@ -7,11 +7,11 @@ using the PGPy backend. Skips if PGPy is unavailable.
 from __future__ import annotations
 
 import json
+import sys
 from pathlib import Path
 
 import pytest
 
-from tests.conftest import TEST_EMAIL, TEST_NAME, TEST_PASSPHRASE, _requires_crypto
 from capauth.authentik.verifier import (
     canonical_claims_payload,
     canonical_nonce_payload,
@@ -21,6 +21,7 @@ from capauth.authentik.verifier import (
     verify_claims_signature,
     verify_nonce_signature,
 )
+from tests.conftest import TEST_EMAIL, TEST_NAME, TEST_PASSPHRASE, _requires_crypto
 
 # Shared cross-impl test vector — the SAME fixture is asserted by the PHP and JS
 # suites so the canonical bytes never drift between languages.
@@ -164,6 +165,43 @@ class TestSignVerify:
         payload = canonical_nonce_payload("uuid", "echo=", "ts", "svc", "exp")
         sig = pgpy_backend.sign(payload, key_bundle.private_armor, TEST_PASSPHRASE)
         assert verify_nonce_signature(payload, sig, key_bundle.public_armor)
+
+    def test_detached_nonce_signature_works_without_optional_gnupg(
+        self, pgpy_backend, key_bundle, monkeypatch
+    ):
+        """A valid detached signature does not depend on python-gnupg."""
+        import pgpy
+
+        payload = canonical_nonce_payload("uuid", "echo=", "ts", "svc", "exp")
+        private_key, _ = pgpy.PGPKey.from_blob(key_bundle.private_armor)
+        with private_key.unlock(TEST_PASSPHRASE):
+            signature = str(private_key.sign(payload))
+
+        monkeypatch.setitem(sys.modules, "gnupg", None)
+        assert verify_nonce_signature(payload, signature, key_bundle.public_armor)
+
+    def test_detached_nonce_signature_rejects_tamper_and_wrong_key(
+        self, pgpy_backend, key_bundle, monkeypatch
+    ):
+        """The native fallback still binds the exact payload and signer key."""
+        import pgpy
+
+        from capauth.models import Algorithm
+
+        payload = canonical_nonce_payload("uuid", "echo=", "ts", "svc", "exp")
+        private_key, _ = pgpy.PGPKey.from_blob(key_bundle.private_armor)
+        with private_key.unlock(TEST_PASSPHRASE):
+            signature = str(private_key.sign(payload))
+        other_bundle = pgpy_backend.generate_keypair(
+            "Other", "other@x.io", TEST_PASSPHRASE, Algorithm.RSA4096
+        )
+
+        monkeypatch.setitem(sys.modules, "gnupg", None)
+        assert not verify_nonce_signature(
+            payload + b"\ntampered", signature, key_bundle.public_armor
+        )
+        assert not verify_nonce_signature(payload, signature, other_bundle.public_armor)
+        assert not verify_nonce_signature(payload, "not armor", key_bundle.public_armor)
 
     def test_nonce_signature_tampered_payload_fails(self, pgpy_backend, key_bundle):
         """A tampered payload fails signature verification."""

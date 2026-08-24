@@ -222,7 +222,7 @@ def _verify_with_gnupg(payload: bytes, signature_armor: str, public_key_armor: s
     try:
         import gnupg
     except ImportError:
-        return False
+        return _verify_with_pgpy(payload, signature_armor, public_key_armor)
     try:
         gpg = gnupg.GPG(gnupghome=_tmp.mkdtemp(prefix="capauth_verify_"))
         gpg.import_keys(public_key_armor)
@@ -234,6 +234,26 @@ def _verify_with_gnupg(payload: bytes, signature_armor: str, public_key_armor: s
             return bool(result.valid)
         finally:
             _os.unlink(sig_path)
+    except Exception:
+        return False
+
+
+def _verify_with_pgpy(payload: bytes, signature_armor: str, public_key_armor: str) -> bool:
+    """Verify a detached signature with the mandatory pure-Python backend.
+
+    This is the dependency-free fallback for service installations that do not
+    include the optional ``python-gnupg`` package.  Keep the same key usability
+    checks as the regular PGPy backend before accepting the signature.
+    """
+    try:
+        import pgpy
+
+        from ..crypto.pgpy_backend import _assert_key_usable
+
+        public_key, _ = pgpy.PGPKey.from_blob(public_key_armor)
+        signature = pgpy.PGPSignature.from_blob(signature_armor)
+        _assert_key_usable(public_key, {signature.signer})
+        return bool(public_key.verify(payload, signature))
     except Exception:
         return False
 

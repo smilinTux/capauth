@@ -1,6 +1,6 @@
-# CapAuth as an OIDC/OAuth2 Identity Provider (Track-2 spike)
+# CapAuth as an OIDC/OAuth2 Identity Provider
 
-**Status:** SPIKE / proof-of-concept (branch `feat/capauth-oidc-idp`)
+**Status:** Browser authorization-code boundary hardened by card `62417b25`.
 **Implements:** Track 2 (Option C2) of `docs/AUTHENTIK_STRATEGY_DECISION.md`
 
 This turns the standalone CapAuth service into its **own OIDC Authorization
@@ -42,6 +42,7 @@ All under the issuer base URL. Canonical discovery is at
 | POST | `/oidc/complete` | Called by the login page after the user signs. Runs the real PGP verify (reuses `verify_auth_response`), mints an auth code bound to the verified fingerprint + PKCE challenge, and returns the redirect URL with `code` + `state`. |
 | POST | `/oidc/token` | `authorization_code` grant + PKCE verify → signed **ID token** (JWT, RS256: `sub`=PGP fingerprint, `iss`, `aud`=client_id, `nonce`, `amr:["pgp"]`, plus `email`/`name`/`groups` from the claims mapper) + `access_token`. |
 | GET | `/oidc/userinfo` | `Authorization: Bearer <access_token>` → the verified claims. |
+| POST | `/oidc/logout`, `/oidc/revoke` | Revoke the presented current bearer access token. |
 
 There is also a root alias `GET /.well-known/oidc-idp-configuration` (same
 content) so generic clients that only know the issuer can autodiscover without
@@ -104,8 +105,8 @@ See `src/capauth/service/oidc/clients.example.json`:
 ```
 
 - `redirect_uris` is matched **exactly** (no wildcards).
-- `client_secret` empty ⇒ a **public** client (PKCE-only); any/empty secret is
-  accepted and PKCE provides the protection.
+- `client_secret` is mandatory. The token endpoint rejects public or
+  unconfigured clients even when PKCE is present.
 
 ### 2.4 Other env knobs
 
@@ -113,9 +114,10 @@ See `src/capauth/service/oidc/clients.example.json`:
 |---|---|---|
 | `CAPAUTH_OIDC_ISSUER` | `CAPAUTH_BASE_URL` | Issuer / public origin. |
 | `CAPAUTH_OIDC_SIGNING_KEY_PATH` | `<home>/service/oidc_signing_key.pem` | RSA signing key PEM. |
+| `CAPAUTH_OIDC_STATE_DB` | `<home>/service/oidc_state.db` | Durable one-use request, code, rate-limit, token currentness, and revocation state. |
 | `CAPAUTH_OIDC_CLIENTS_FILE` / `_JSON` | — | Static client registry. |
-| `CAPAUTH_OIDC_ID_TOKEN_TTL` | `3600` | ID token lifetime (s). |
-| `CAPAUTH_OIDC_ACCESS_TOKEN_TTL` | `3600` | Access token lifetime (s). |
+| `CAPAUTH_OIDC_ID_TOKEN_TTL` | `300` | ID token lifetime in seconds, bounded to 1 through 300. |
+| `CAPAUTH_OIDC_ACCESS_TOKEN_TTL` | `300` | Access token lifetime in seconds, bounded to 1 through 300. |
 
 ### 2.5 Run it
 
@@ -203,31 +205,27 @@ Save. Authentik fetches the JWKS and will verify CapAuth's RS256 ID tokens.
 
 ---
 
-## 4. What's stubbed / TODO (this is a SPIKE)
+## 4. Security boundary and remaining work
 
-The OIDC plumbing, RS256 signing, PKCE, code single-use, and the PGP login are
-real and tested. The following are intentionally **not** production-hardened:
+The browser flow requires an exact HTTPS issuer, registered redirect, scope,
+state, nonce, confidential client, and RFC 7636 S256 challenge. Login requests
+and codes are durable and one-use across restart. Only an explicitly enrolled
+and approved fingerprint can complete login. ID and access tokens are bounded
+to five minutes. UserInfo checks durable token currentness, the registered
+client and scope, and enrollment approval on every request. Rate-limit,
+enrollment, signing, configuration, and state outages deny without being
+collapsed into an authentication denial.
 
-- **Persistent code/request store.** `AuthCodeStore` is process-local in-memory
-  → does not survive restarts and is not HA-safe. Swap for Redis/DB. (The nonce
-  store already supports Django cache / Redis when run inside Authentik, but the
-  standalone service uses the in-process dict.)
-- **Token revocation / refresh.** No `refresh_token`, no `/revoke`, no
-  introspection for the RS256 tokens. ID/access tokens just expire (TTL).
+- **Refresh tokens.** The browser authorization-code boundary intentionally
+  issues no refresh token. Refresh-family work belongs to its separately gated
+  contract.
 - **Dynamic client registration.** Clients are static config only (no
-  `/register`, no admin CRUD). One client = Authentik for the spike.
-- **Rate limiting / brute-force protection** on `/authorize` + `/complete`.
-- **Enrollment policy.** `/oidc/complete` auto-enrolls + auto-approves a
-  first-seen key (spike convenience). Production should honor
-  `CAPAUTH_REQUIRE_APPROVAL` / admin approval like `/capauth/v1/verify` and the
-  Authentik stage do.
+  `/register`, no admin CRUD).
 - **Signing-key rotation / multi-key JWKS.** Single key, single `kid`. No
   overlap window for rotation; JWKS publishes exactly one key.
 - **Scope-filtered claims.** All mapped claims are included; per-scope claim
   filtering (`map_claims(requested_scopes=…)`) is not yet applied at the token
   endpoint.
-- **`state`/CSRF on the login page** is carried by the client; the page itself
-  has no anti-CSRF token on `/oidc/complete` beyond the opaque `request_id`.
 - **PGP login page polish** (QR/extension auto-fill hooks exist in other flows;
   this page is minimal server-rendered HTML).
 

@@ -6,6 +6,15 @@ All notable changes to `capauth` are documented here. The format is based on
 
 ## [Unreleased]
 
+- Hardened the CapAuth browser OIDC boundary with mandatory S256, state,
+  nonce, exact HTTPS issuer, registered redirect and scope binding, explicit
+  approved enrollment, confidential client authentication, and token lifetimes
+  bounded to five minutes. Authorization requests and codes now use durable
+  atomic one-use SQLite transactions across restart. Durable hashed rate-limit,
+  access-token currentness, logout, and revocation state fail closed with
+  distinct enrollment, signing, configuration, state, and currentness outage
+  results (card `62417b25`).
+
 - Added an opaque two-phase control-plane currentness verifier for protected
   downstream owner reads. It binds two ordered request-local checks to the exact
   authorizer-issued context, preserves deny versus unavailable, detects current

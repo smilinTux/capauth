@@ -18,6 +18,7 @@ from __future__ import annotations
 import base64
 import hashlib
 from pathlib import Path
+from urllib.parse import parse_qs, urlsplit
 
 import pytest
 
@@ -46,7 +47,7 @@ def e2e_client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setenv("CAPAUTH_SERVICE_ID", "capauth-e2e.test")
     monkeypatch.setenv("CAPAUTH_OIDC_ISSUER", ISSUER)
     monkeypatch.setenv("CAPAUTH_OIDC_SIGNING_KEY_PATH", str(tmp_path / "signing.pem"))
-    monkeypatch.setenv("CAPAUTH_REQUIRE_APPROVAL", "false")
+    monkeypatch.setenv("CAPAUTH_OIDC_STATE_DB", str(tmp_path / "oidc_state.db"))
     monkeypatch.setenv(
         "CAPAUTH_OIDC_CLIENTS_JSON",
         f'[{{"client_id":"{CLIENT_ID}","client_secret":"{CLIENT_SECRET}",'
@@ -70,7 +71,7 @@ def e2e_client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
 
     client = TestClient(svc_app.app)
     router = svc_app._oidc_router
-    yield client, router
+    yield client, router, svc_app._keystore
 
     svc_app._keystore = None
     ns._MEM_CACHE.clear()
@@ -79,10 +80,11 @@ def e2e_client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
 
 
 def test_full_oidc_flow_with_real_pgp(e2e_client):
-    client, router = e2e_client
+    client, router, keystore = e2e_client
     backend = get_backend(CryptoBackendType.PGPY)
     bundle = backend.generate_keypair("E2E", "e2e@capauth.test", "pp", Algorithm.RSA4096)
     fingerprint = bundle.fingerprint.upper()
+    keystore.enroll(fingerprint, bundle.public_armor, approved=True)
 
     # 1. PKCE pair
     verifier = "pkce-verifier-eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
@@ -97,8 +99,8 @@ def test_full_oidc_flow_with_real_pgp(e2e_client):
             "client_id": CLIENT_ID,
             "redirect_uri": REDIRECT_URI,
             "scope": "openid profile email",
-            "state": "st8",
-            "nonce": "oidc-nonce-1",
+            "state": "state-0123456789abcdef",
+            "nonce": "nonce-0123456789abcdef",
             "code_challenge": challenge,
             "code_challenge_method": "S256",
         },
@@ -123,7 +125,7 @@ def test_full_oidc_flow_with_real_pgp(e2e_client):
     )
     sig = backend.sign(payload, bundle.private_armor, "pp")
 
-    # 4. /oidc/complete with the real signature + public key (first-time enroll).
+    # 4. /oidc/complete with the real signature for the approved enrollment.
     comp = client.post(
         "/oidc/complete",
         json={
@@ -131,12 +133,11 @@ def test_full_oidc_flow_with_real_pgp(e2e_client):
             "fingerprint": fingerprint,
             "nonce": ch["nonce"],
             "nonce_signature": sig,
-            "public_key": bundle.public_armor,
         },
     )
     assert comp.status_code == 200, comp.text
-    code = comp.json()["code"]
-    assert "state=st8" in comp.json()["redirect_to"]
+    code = parse_qs(urlsplit(comp.json()["redirect_to"]).query)["code"][0]
+    assert "state=state-0123456789abcdef" in comp.json()["redirect_to"]
 
     # 5. /oidc/token
     tok = client.post(
@@ -164,7 +165,7 @@ def test_full_oidc_flow_with_real_pgp(e2e_client):
     )
     assert claims["sub"] == fingerprint
     assert claims["iss"] == ISSUER
-    assert claims["nonce"] == "oidc-nonce-1"
+    assert claims["nonce"] == "nonce-0123456789abcdef"
     assert claims["amr"] == ["pgp"]
 
     # 7. userinfo

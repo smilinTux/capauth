@@ -1,34 +1,40 @@
-"""In-memory authorization-request + code store for the CapAuth OIDC IdP.
-
-Two short-lived record types:
-
-* ``LoginRequest`` — created when a client hits ``/oidc/authorize``. Holds the
-  validated OAuth params (client, redirect_uri, scope, state, PKCE challenge,
-  OIDC ``nonce``) until the user finishes PGP login. Keyed by an opaque
-  ``request_id`` carried through the PGP login page.
-
-* ``AuthCode`` — minted after a successful PGP verify. Binds the authorization
-  code to the verified fingerprint + claims + PKCE challenge + client. Consumed
-  exactly once at ``/oidc/token``.
-
-SPIKE: this is process-local and not persisted. Swap for Redis/DB for HA and to
-survive restarts (see TODO in docs/CAPAUTH_OIDC_IDP.md).
-"""
+"""Durable, fail-closed state for the CapAuth OIDC authorization-code flow."""
 
 from __future__ import annotations
 
 import base64
 import hashlib
 import hmac
+import json
+import os
 import secrets
+import sqlite3
 import time
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
+from pathlib import Path
 from typing import Any, Optional
 
+from ... import resolve_capauth_home
 
-@dataclass
+MAX_REQUEST_TTL = 300
+MAX_CODE_TTL = 120
+
+
+class OIDCStateUnavailableError(RuntimeError):
+    """The durable OIDC state boundary could not be read or mutated."""
+
+
+class InvalidGrantError(ValueError):
+    """An authorization code is absent, expired, replayed, or mis-bound."""
+
+
+class RateLimitExceededError(ValueError):
+    """A bounded OIDC request rate was exceeded."""
+
+
+@dataclass(frozen=True)
 class LoginRequest:
-    """A pending authorization request awaiting PGP login completion."""
+    """A pending authorization request awaiting identity proof."""
 
     request_id: str
     client_id: str
@@ -37,14 +43,14 @@ class LoginRequest:
     state: str
     code_challenge: str
     code_challenge_method: str
-    nonce: str  # OIDC nonce (echoed into the ID token), NOT the PGP nonce
+    nonce: str
     issued_at: float
     expires_at: float
 
 
-@dataclass
+@dataclass(frozen=True)
 class AuthCode:
-    """A minted authorization code bound to a verified identity."""
+    """A one-use authorization code bound to one validated request."""
 
     code: str
     client_id: str
@@ -60,47 +66,101 @@ class AuthCode:
 
 
 def verify_pkce(code_verifier: str, code_challenge: str, method: str) -> bool:
-    """Verify a PKCE ``code_verifier`` against a stored ``code_challenge``.
-
-    Args:
-        code_verifier: Plain-text verifier presented at the token endpoint.
-        code_challenge: Challenge captured at the authorization endpoint.
-        method: ``"S256"`` or ``"plain"``.
-
-    Returns:
-        bool: True when verification passes. If no challenge was registered the
-        check passes (PKCE was not requested by that client).
-    """
-    if not code_challenge:
-        return True
-    if not code_verifier:
+    """Verify a mandatory RFC 7636 S256 challenge."""
+    if method != "S256" or not (43 <= len(code_verifier) <= 128):
         return False
-    if method == "plain":
-        return hmac.compare_digest(code_verifier, code_challenge)
-    if method == "S256":
-        digest = hashlib.sha256(code_verifier.encode("ascii")).digest()
-        computed = base64.urlsafe_b64encode(digest).rstrip(b"=").decode("ascii")
-        return hmac.compare_digest(computed, code_challenge)
-    return False
+    if not (43 <= len(code_challenge) <= 128):
+        return False
+    allowed = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-._~"
+    if any(char not in allowed for char in code_verifier):
+        return False
+    digest = hashlib.sha256(code_verifier.encode("ascii")).digest()
+    computed = base64.urlsafe_b64encode(digest).rstrip(b"=").decode("ascii")
+    return hmac.compare_digest(computed, code_challenge)
+
+
+def _default_path() -> Path:
+    override = os.environ.get("CAPAUTH_OIDC_STATE_DB")
+    if override:
+        return Path(override).expanduser()
+    data_dir = os.environ.get("CAPAUTH_DATA_DIR")
+    if data_dir:
+        return Path(data_dir).expanduser() / "oidc_state.db"
+    return resolve_capauth_home() / "service" / "oidc_state.db"
 
 
 class AuthCodeStore:
-    """Process-local store for login requests and authorization codes.
+    """SQLite-backed OIDC requests, codes, rate limits, and token currentness."""
 
-    Args:
-        request_ttl: Seconds a pending login request stays valid (default 600).
-        code_ttl: Seconds an authorization code stays valid (default 120).
-    """
-
-    def __init__(self, request_ttl: int = 600, code_ttl: int = 120) -> None:
+    def __init__(
+        self,
+        path: Path | str | None = None,
+        request_ttl: int = MAX_REQUEST_TTL,
+        code_ttl: int = MAX_CODE_TTL,
+    ) -> None:
+        if not 1 <= request_ttl <= MAX_REQUEST_TTL:
+            raise ValueError("request_ttl must be between 1 and 300 seconds")
+        if not 1 <= code_ttl <= MAX_CODE_TTL:
+            raise ValueError("code_ttl must be between 1 and 120 seconds")
+        self.path = Path(path) if path is not None else _default_path()
         self.request_ttl = request_ttl
         self.code_ttl = code_ttl
-        self._requests: dict[str, LoginRequest] = {}
-        self._codes: dict[str, AuthCode] = {}
+        self._initialize()
 
-    # ------------------------------------------------------------------
-    # Login requests
-    # ------------------------------------------------------------------
+    def _connect(self) -> sqlite3.Connection:
+        conn = sqlite3.connect(str(self.path), timeout=5.0)
+        conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA busy_timeout = 5000")
+        conn.execute("PRAGMA foreign_keys = ON")
+        return conn
+
+    def _initialize(self) -> None:
+        try:
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+            with self._connect() as conn:
+                conn.executescript(
+                    """
+                    CREATE TABLE IF NOT EXISTS login_requests (
+                        request_id TEXT PRIMARY KEY,
+                        payload TEXT NOT NULL,
+                        expires_at REAL NOT NULL
+                    );
+                    CREATE TABLE IF NOT EXISTS auth_codes (
+                        code_hash TEXT PRIMARY KEY,
+                        payload TEXT NOT NULL,
+                        expires_at REAL NOT NULL
+                    );
+                    CREATE TABLE IF NOT EXISTS access_tokens (
+                        jti_hash TEXT PRIMARY KEY,
+                        subject TEXT NOT NULL,
+                        client_id TEXT NOT NULL,
+                        expires_at REAL NOT NULL,
+                        revoked_at REAL
+                    );
+                    CREATE TABLE IF NOT EXISTS rate_events (
+                        bucket TEXT NOT NULL,
+                        key_hash TEXT NOT NULL,
+                        occurred_at REAL NOT NULL
+                    );
+                    CREATE INDEX IF NOT EXISTS rate_window
+                        ON rate_events(bucket, key_hash, occurred_at);
+                    """
+                )
+            os.chmod(self.path, 0o600)
+        except (OSError, sqlite3.Error) as exc:
+            raise OIDCStateUnavailableError("OIDC state initialization failed") from exc
+
+    @staticmethod
+    def _digest(value: str) -> str:
+        return hashlib.sha256(value.encode("utf-8")).hexdigest()
+
+    @staticmethod
+    def _request_from_row(row: sqlite3.Row) -> LoginRequest:
+        return LoginRequest(**json.loads(row["payload"]))
+
+    @staticmethod
+    def _code_from_row(row: sqlite3.Row) -> AuthCode:
+        return AuthCode(**json.loads(row["payload"]))
 
     def create_login_request(
         self,
@@ -108,104 +168,226 @@ class AuthCodeStore:
         redirect_uri: str,
         scope: str,
         state: str,
-        code_challenge: str = "",
-        code_challenge_method: str = "S256",
-        nonce: str = "",
+        code_challenge: str,
+        code_challenge_method: str,
+        nonce: str,
     ) -> LoginRequest:
-        """Create and store a pending login request, returning it."""
-        self._evict_expired()
         now = time.time()
-        req = LoginRequest(
-            request_id=secrets.token_urlsafe(24),
+        record = LoginRequest(
+            request_id=secrets.token_urlsafe(32),
             client_id=client_id,
             redirect_uri=redirect_uri,
             scope=scope,
             state=state,
             code_challenge=code_challenge,
-            code_challenge_method=code_challenge_method or "S256",
+            code_challenge_method=code_challenge_method,
             nonce=nonce,
             issued_at=now,
             expires_at=now + self.request_ttl,
         )
-        self._requests[req.request_id] = req
-        return req
+        try:
+            with self._connect() as conn:
+                conn.execute(
+                    "INSERT INTO login_requests VALUES (?, ?, ?)",
+                    (record.request_id, json.dumps(asdict(record)), record.expires_at),
+                )
+            return record
+        except sqlite3.Error as exc:
+            raise OIDCStateUnavailableError("OIDC request write failed") from exc
 
     def get_login_request(self, request_id: str) -> Optional[LoginRequest]:
-        """Return a live login request, or None if missing/expired."""
-        req = self._requests.get(request_id)
-        if req is None:
-            return None
-        if time.time() > req.expires_at:
-            self._requests.pop(request_id, None)
-            return None
-        return req
+        try:
+            with self._connect() as conn:
+                row = conn.execute(
+                    "SELECT payload, expires_at FROM login_requests WHERE request_id = ?",
+                    (request_id,),
+                ).fetchone()
+                if row is None:
+                    return None
+                if row["expires_at"] < time.time():
+                    conn.execute("DELETE FROM login_requests WHERE request_id = ?", (request_id,))
+                    return None
+                return self._request_from_row(row)
+        except sqlite3.Error as exc:
+            raise OIDCStateUnavailableError("OIDC request read failed") from exc
 
-    def pop_login_request(self, request_id: str) -> Optional[LoginRequest]:
-        """Remove and return a login request (call when minting the code)."""
-        req = self.get_login_request(request_id)
-        if req is not None:
-            self._requests.pop(request_id, None)
-        return req
+    def complete_login_request(
+        self, request_id: str, fingerprint: str, claims: dict[str, Any]
+    ) -> tuple[LoginRequest, AuthCode]:
+        """Atomically consume a login request and persist its one-use code."""
+        now = time.time()
+        try:
+            conn = self._connect()
+            try:
+                conn.execute("BEGIN IMMEDIATE")
+                row = conn.execute(
+                    "SELECT payload, expires_at FROM login_requests WHERE request_id = ?",
+                    (request_id,),
+                ).fetchone()
+                if row is None or row["expires_at"] < now:
+                    conn.execute("DELETE FROM login_requests WHERE request_id = ?", (request_id,))
+                    conn.commit()
+                    raise InvalidGrantError("expired_or_unknown_request")
+                request = self._request_from_row(row)
+                code = AuthCode(
+                    code=secrets.token_urlsafe(32),
+                    client_id=request.client_id,
+                    redirect_uri=request.redirect_uri,
+                    scope=request.scope,
+                    nonce=request.nonce,
+                    code_challenge=request.code_challenge,
+                    code_challenge_method=request.code_challenge_method,
+                    fingerprint=fingerprint,
+                    claims=claims,
+                    issued_at=now,
+                    expires_at=now + self.code_ttl,
+                )
+                conn.execute("DELETE FROM login_requests WHERE request_id = ?", (request_id,))
+                stored_code = asdict(code)
+                stored_code["code"] = ""
+                conn.execute(
+                    "INSERT INTO auth_codes VALUES (?, ?, ?)",
+                    (self._digest(code.code), json.dumps(stored_code), code.expires_at),
+                )
+                conn.commit()
+                return request, code
+            except Exception:
+                if conn.in_transaction:
+                    conn.rollback()
+                raise
+            finally:
+                conn.close()
+        except InvalidGrantError:
+            raise
+        except (TypeError, ValueError, sqlite3.Error) as exc:
+            raise OIDCStateUnavailableError("OIDC completion transaction failed") from exc
 
-    # ------------------------------------------------------------------
-    # Authorization codes
-    # ------------------------------------------------------------------
-
-    def issue_code(
-        self,
-        request: LoginRequest,
-        fingerprint: str,
-        claims: dict[str, Any],
+    def consume_code(
+        self, code: str, client_id: str, redirect_uri: str, code_verifier: str
     ) -> AuthCode:
-        """Mint an authorization code from a completed login request."""
-        self._evict_expired()
+        """Atomically consume a live code after exact client, redirect, and PKCE checks."""
         now = time.time()
-        code = AuthCode(
-            code=secrets.token_urlsafe(32),
-            client_id=request.client_id,
-            redirect_uri=request.redirect_uri,
-            scope=request.scope,
-            nonce=request.nonce,
-            code_challenge=request.code_challenge,
-            code_challenge_method=request.code_challenge_method,
-            fingerprint=fingerprint,
-            claims=claims,
-            issued_at=now,
-            expires_at=now + self.code_ttl,
-        )
-        self._codes[code.code] = code
-        return code
+        code_hash = self._digest(code)
+        try:
+            conn = self._connect()
+            try:
+                conn.execute("BEGIN IMMEDIATE")
+                row = conn.execute(
+                    "SELECT payload, expires_at FROM auth_codes WHERE code_hash = ?", (code_hash,)
+                ).fetchone()
+                if row is None:
+                    conn.commit()
+                    raise InvalidGrantError("unknown_or_replayed_code")
+                conn.execute("DELETE FROM auth_codes WHERE code_hash = ?", (code_hash,))
+                record = self._code_from_row(row)
+                valid = (
+                    row["expires_at"] >= now
+                    and hmac.compare_digest(record.client_id, client_id)
+                    and hmac.compare_digest(record.redirect_uri, redirect_uri)
+                    and verify_pkce(
+                        code_verifier, record.code_challenge, record.code_challenge_method
+                    )
+                )
+                conn.commit()
+                if not valid:
+                    raise InvalidGrantError("invalid_code_binding")
+                return record
+            except Exception:
+                if conn.in_transaction:
+                    conn.rollback()
+                raise
+            finally:
+                conn.close()
+        except InvalidGrantError:
+            raise
+        except sqlite3.Error as exc:
+            raise OIDCStateUnavailableError("OIDC code transaction failed") from exc
 
-    def consume_code(self, code: str) -> Optional[AuthCode]:
-        """Single-use consumption of an authorization code.
+    def register_access_token(
+        self, jti: str, subject: str, client_id: str, expires_at: float
+    ) -> None:
+        try:
+            with self._connect() as conn:
+                conn.execute(
+                    "INSERT INTO access_tokens VALUES (?, ?, ?, ?, NULL)",
+                    (self._digest(jti), subject, client_id, expires_at),
+                )
+        except sqlite3.Error as exc:
+            raise OIDCStateUnavailableError("OIDC token registration failed") from exc
 
-        Returns the record on success (removing it), or None if the code is
-        unknown, already used, or expired.
-        """
-        record = self._codes.pop(code, None)
-        if record is None:
-            return None
-        if time.time() > record.expires_at:
-            return None
-        return record
+    def access_token_current(self, jti: str, subject: str, client_id: str) -> bool:
+        try:
+            with self._connect() as conn:
+                row = conn.execute(
+                    "SELECT subject, client_id, expires_at, revoked_at FROM access_tokens "
+                    "WHERE jti_hash = ?",
+                    (self._digest(jti),),
+                ).fetchone()
+            return bool(
+                row
+                and row["revoked_at"] is None
+                and row["expires_at"] >= time.time()
+                and hmac.compare_digest(row["subject"], subject)
+                and hmac.compare_digest(row["client_id"], client_id)
+            )
+        except sqlite3.Error as exc:
+            raise OIDCStateUnavailableError("OIDC token currentness read failed") from exc
 
-    # ------------------------------------------------------------------
-    # Maintenance / diagnostics
-    # ------------------------------------------------------------------
+    def revoke_access_token(self, jti: str) -> bool:
+        try:
+            with self._connect() as conn:
+                cursor = conn.execute(
+                    "UPDATE access_tokens SET revoked_at = ? "
+                    "WHERE jti_hash = ? AND revoked_at IS NULL",
+                    (time.time(), self._digest(jti)),
+                )
+            return cursor.rowcount == 1
+        except sqlite3.Error as exc:
+            raise OIDCStateUnavailableError("OIDC token revocation failed") from exc
 
-    def _evict_expired(self) -> None:
+    def enforce_rate_limit(
+        self, bucket: str, key: str, *, limit: int, window_seconds: int = 60
+    ) -> None:
         now = time.time()
-        for rid in [k for k, v in self._requests.items() if v.expires_at < now]:
-            self._requests.pop(rid, None)
-        for code in [k for k, v in self._codes.items() if v.expires_at < now]:
-            self._codes.pop(code, None)
+        key_hash = self._digest(key)
+        try:
+            conn = self._connect()
+            try:
+                conn.execute("BEGIN IMMEDIATE")
+                conn.execute("DELETE FROM rate_events WHERE occurred_at < ?", (now - 3600,))
+                count = conn.execute(
+                    "SELECT COUNT(*) FROM rate_events "
+                    "WHERE bucket = ? AND key_hash = ? AND occurred_at >= ?",
+                    (bucket, key_hash, now - window_seconds),
+                ).fetchone()[0]
+                if count >= limit:
+                    conn.commit()
+                    raise RateLimitExceededError(bucket)
+                conn.execute("INSERT INTO rate_events VALUES (?, ?, ?)", (bucket, key_hash, now))
+                conn.commit()
+            except Exception:
+                if conn.in_transaction:
+                    conn.rollback()
+                raise
+            finally:
+                conn.close()
+        except RateLimitExceededError:
+            raise
+        except sqlite3.Error as exc:
+            raise OIDCStateUnavailableError("OIDC rate-limit state unavailable") from exc
+
+    def _count(self, table: str) -> int:
+        try:
+            with self._connect() as conn:
+                conn.execute(f"DELETE FROM {table} WHERE expires_at < ?", (time.time(),))
+                return int(conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0])
+        except sqlite3.Error as exc:
+            raise OIDCStateUnavailableError("OIDC state count failed") from exc
 
     @property
     def pending_requests(self) -> int:
-        """Number of login requests awaiting completion."""
-        return len(self._requests)
+        return self._count("login_requests")
 
     @property
     def pending_codes(self) -> int:
-        """Number of authorization codes awaiting exchange."""
-        return len(self._codes)
+        return self._count("auth_codes")

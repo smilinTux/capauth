@@ -28,9 +28,10 @@ from __future__ import annotations
 
 import logging
 import os
+import secrets
 import time
 from typing import Any, Optional
-from urllib.parse import urlencode
+from urllib.parse import urlencode, urlsplit
 
 import jwt as pyjwt
 from fastapi import APIRouter, Form, HTTPException, Request
@@ -40,23 +41,56 @@ from ...authentik.claims_mapper import preferred_username_fallback
 from .clients import ClientRegistry
 from .passkey import PasskeyStore
 from .signing_key import SigningKey
-from .store import AuthCodeStore, verify_pkce
+from .store import (
+    AuthCodeStore,
+    InvalidGrantError,
+    OIDCStateUnavailableError,
+    RateLimitExceededError,
+)
 
 logger = logging.getLogger("capauth.service.oidc")
 
 SUPPORTED_SCOPES = ["openid", "profile", "email", "groups"]
-ID_TOKEN_TTL = int(os.environ.get("CAPAUTH_OIDC_ID_TOKEN_TTL", "3600"))
-ACCESS_TOKEN_TTL = int(os.environ.get("CAPAUTH_OIDC_ACCESS_TOKEN_TTL", "3600"))
+MAX_TOKEN_TTL = 300
+_OPAQUE_MIN_LENGTH = 16
+_RATE_LIMITS = {"authorize": 30, "complete": 10, "token": 30, "logout": 30}
+
+
+def _bounded_ttl(name: str) -> int:
+    try:
+        value = int(os.environ.get(name, str(MAX_TOKEN_TTL)))
+    except ValueError as exc:
+        raise ValueError(f"{name} must be an integer") from exc
+    if not 1 <= value <= MAX_TOKEN_TTL:
+        raise ValueError(f"{name} must be between 1 and 300 seconds")
+    return value
+
+
+def _validate_issuer(candidate: str) -> str:
+    candidate = candidate.rstrip("/")
+    parsed = urlsplit(candidate)
+    if (
+        parsed.scheme != "https"
+        or not parsed.hostname
+        or parsed.username is not None
+        or parsed.password is not None
+        or parsed.path not in ("", "/")
+        or parsed.query
+        or parsed.fragment
+    ):
+        raise ValueError("OIDC issuer must be an exact HTTPS origin")
+    return candidate
 
 
 def issuer_url() -> str:
-    """Resolve the IdP issuer URL (``CAPAUTH_OIDC_ISSUER`` or base URL)."""
+    """Resolve and strictly validate the configured HTTPS issuer origin."""
     explicit = os.environ.get("CAPAUTH_OIDC_ISSUER")
     if explicit:
-        return explicit.rstrip("/")
-    service_id = os.environ.get("CAPAUTH_SERVICE_ID", "capauth.local")
-    base = os.environ.get("CAPAUTH_BASE_URL", f"https://{service_id}")
-    return base.rstrip("/")
+        candidate = explicit.rstrip("/")
+    else:
+        service_id = os.environ.get("CAPAUTH_SERVICE_ID", "capauth.local")
+        candidate = os.environ.get("CAPAUTH_BASE_URL", f"https://{service_id}").rstrip("/")
+    return _validate_issuer(candidate)
 
 
 def discovery_document(issuer: Optional[str] = None) -> dict[str, Any]:
@@ -68,7 +102,7 @@ def discovery_document(issuer: Optional[str] = None) -> dict[str, Any]:
     Returns:
         dict: The ``.well-known/openid-configuration`` payload.
     """
-    iss = (issuer or issuer_url()).rstrip("/")
+    iss = _validate_issuer(issuer or issuer_url())
     return {
         "issuer": iss,
         "authorization_endpoint": f"{iss}/oidc/authorize",
@@ -84,9 +118,10 @@ def discovery_document(issuer: Optional[str] = None) -> dict[str, Any]:
         "token_endpoint_auth_methods_supported": [
             "client_secret_post",
             "client_secret_basic",
-            "none",
         ],
-        "code_challenge_methods_supported": ["S256", "plain"],
+        "code_challenge_methods_supported": ["S256"],
+        "revocation_endpoint": f"{iss}/oidc/revoke",
+        "end_session_endpoint": f"{iss}/oidc/logout",
         "claims_supported": [
             "sub",
             "iss",
@@ -158,8 +193,7 @@ _LOGIN_PAGE = """<!DOCTYPE html>
   <label for="sig">Signed message / signature (ASCII armor)</label>
   <textarea id="sig" placeholder="-----BEGIN PGP MESSAGE-----&#10;...&#10;-----END PGP MESSAGE-----"></textarea>
 
-  <label for="pub" style="font-size:.72rem;color:#475569">First time? Paste your public key (armored) to enroll</label>
-  <textarea id="pub" style="min-height:80px" placeholder="-----BEGIN PGP PUBLIC KEY BLOCK----- (optional after first login)"></textarea>
+  <p class="sub">This fingerprint must already have an approved CapAuth enrollment.</p>
 
   <button onclick="submitSig()">Verify &amp; Continue</button>
   <div class="err" id="err"></div>
@@ -238,15 +272,12 @@ async function submitSig(){{
   document.getElementById("err").style.display="none";
   const fp=document.getElementById("fp").value.trim().toUpperCase().replace(/\\s/g,"");
   const sig=document.getElementById("sig").value.trim();
-  const pub=document.getElementById("pub").value.trim();
   if(![40,64].includes(fp.length)) return setErr("Fingerprint must be 40- or 64-hex characters.");
   if(!currentNonce) return setErr("No challenge loaded — tab out of the fingerprint field first.");
   if(!sig) return setErr("Paste your PGP signature.");
 
   const body={{request_id:REQUEST_ID, fingerprint:fp, nonce:currentNonce,
                nonce_signature:sig}};
-  if(pub) body.public_key=pub;
-
   const r=await fetch(BASE + "/oidc/complete", {{
     method:"POST", headers:{{"Content-Type":"application/json"}}, body: JSON.stringify(body)
   }});
@@ -631,14 +662,14 @@ def build_oidc_router(
         signing_key: RSA token-signing key. Defaults to a persisted
             :class:`SigningKey`.
         clients: Static :class:`ClientRegistry`. Defaults to env-loaded.
-        store: :class:`AuthCodeStore`. Defaults to a fresh in-memory store.
+        store: :class:`AuthCodeStore`. Defaults to the durable service store.
 
     Returns:
         APIRouter: Mount at prefix ``/oidc``.
     """
     signing_key = signing_key or SigningKey()
     clients = clients if clients is not None else ClientRegistry()
-    store = store or AuthCodeStore()
+    store = store if store is not None else AuthCodeStore()
     passkeys = (
         passkeys
         if passkeys is not None
@@ -670,19 +701,21 @@ def build_oidc_router(
         from ...authentik.verifier import fingerprint_from_armor
         from ..app import SERVICE_ID, get_keystore
 
-        ks = get_keystore()
-        existing = ks.get(fingerprint)
-        armor = public_key or (existing.public_key_armor if existing else "")
-        if not armor:
+        try:
+            ks = get_keystore()
+            existing = ks.get(fingerprint)
+        except Exception:
+            return False, "enrollment_unavailable", {}
+        if existing is None:
             return False, "unknown_fingerprint", {}
+        if not getattr(existing, "approved", False):
+            return False, "fingerprint_not_approved", {}
+
+        armor = public_key or existing.public_key_armor
 
         derived = fingerprint_from_armor(armor)
         if derived and derived.upper() != fingerprint.upper():
             return False, "invalid_fingerprint", {}
-
-        # Enroll-on-first-use (mirrors /capauth/v1/verify; spike: auto-approve).
-        if existing is None:
-            ks.enroll(fingerprint, armor, approved=True)
 
         nonce_record = peek(nonce)
         if nonce_record is None:
@@ -704,7 +737,10 @@ def build_oidc_router(
             challenge_context=challenge_ctx,
         )
         if ok:
-            ks.update_last_auth(fingerprint)
+            try:
+                ks.update_last_auth(fingerprint)
+            except Exception:
+                return False, "enrollment_unavailable", {}
         return ok, err, oidc_claims
 
     # ------------------------------------------------------------------
@@ -723,8 +759,81 @@ def build_oidc_router(
     # Authorization endpoint — renders the PGP login page
     # ------------------------------------------------------------------
 
+    def _source(request: Request) -> str:
+        return request.client.host if request.client else "unknown"
+
+    def _limit(bucket: str, key: str) -> None:
+        try:
+            store.enforce_rate_limit(bucket, key, limit=_RATE_LIMITS[bucket])
+        except RateLimitExceededError:
+            raise HTTPException(status_code=429, detail="rate_limited")
+        except OIDCStateUnavailableError:
+            raise HTTPException(status_code=503, detail="state_unavailable")
+
+    def _current_identity(fingerprint: str) -> bool:
+        from ..app import get_keystore
+
+        try:
+            enrolled = get_keystore().get(fingerprint)
+        except Exception:
+            raise HTTPException(status_code=503, detail="enrollment_unavailable")
+        return bool(enrolled is not None and getattr(enrolled, "approved", False))
+
+    def _decode_access_token(token_str: str) -> dict[str, Any]:
+        try:
+            iss = issuer_url()
+        except ValueError:
+            raise HTTPException(status_code=503, detail="issuer_unavailable")
+        try:
+            payload = pyjwt.decode(
+                token_str,
+                signing_key.public_pem,
+                algorithms=[signing_key.ALGORITHM],
+                issuer=iss,
+                audience=None,
+                options={
+                    "verify_aud": False,
+                    "require": [
+                        "sub",
+                        "iss",
+                        "aud",
+                        "iat",
+                        "exp",
+                        "jti",
+                        "scope",
+                        "token_use",
+                    ],
+                },
+            )
+        except pyjwt.ExpiredSignatureError:
+            raise HTTPException(status_code=401, detail="token_expired")
+        except pyjwt.InvalidTokenError:
+            raise HTTPException(status_code=401, detail="invalid_token")
+        if (
+            payload.get("token_use") != "access"
+            or not isinstance(payload.get("aud"), str)
+            or type(payload.get("iat")) is not int
+            or type(payload.get("exp")) is not int
+            or not 1 <= payload["exp"] - payload["iat"] <= MAX_TOKEN_TTL
+        ):
+            raise HTTPException(status_code=401, detail="invalid_token")
+        client = clients.get(payload["aud"])
+        granted = str(payload.get("scope", "")).split()
+        if client is None or "openid" not in granted or not set(granted).issubset(client.scopes):
+            raise HTTPException(status_code=401, detail="grant_not_current")
+        try:
+            current = store.access_token_current(payload["jti"], payload["sub"], payload["aud"])
+        except OIDCStateUnavailableError:
+            raise HTTPException(status_code=503, detail="currentness_unavailable")
+        if not current:
+            raise HTTPException(status_code=401, detail="token_not_current")
+        if not _current_identity(payload["sub"]):
+            raise HTTPException(status_code=401, detail="enrollment_not_current")
+        return payload
+
     @router.get("/authorize", summary="Authorization endpoint (renders PGP login)")
     async def authorize(
+        request: Request,
         response_type: str = "code",
         client_id: str = "",
         redirect_uri: str = "",
@@ -733,7 +842,9 @@ def build_oidc_router(
         nonce: str = "",
         code_challenge: str = "",
         code_challenge_method: str = "S256",
+        issuer: str = "",
     ) -> Any:
+        _limit("authorize", _source(request))
         if response_type != "code":
             raise HTTPException(status_code=400, detail="unsupported_response_type")
 
@@ -743,20 +854,43 @@ def build_oidc_router(
         if not redirect_uri or not client.redirect_uri_allowed(redirect_uri):
             # Per OAuth2: do NOT redirect on an invalid redirect_uri.
             raise HTTPException(status_code=400, detail="invalid redirect_uri")
-        if code_challenge_method not in ("S256", "plain"):
+        try:
+            expected_issuer = issuer_url()
+        except ValueError:
+            raise HTTPException(status_code=503, detail="issuer_unavailable")
+        if issuer and issuer != expected_issuer:
+            raise HTTPException(status_code=400, detail="invalid_issuer")
+        if code_challenge_method != "S256":
             raise HTTPException(status_code=400, detail="unsupported code_challenge_method")
+        if not (43 <= len(code_challenge) <= 128):
+            raise HTTPException(status_code=400, detail="invalid_code_challenge")
+        if not (_OPAQUE_MIN_LENGTH <= len(state) <= 512):
+            raise HTTPException(status_code=400, detail="invalid_state")
+        if not (_OPAQUE_MIN_LENGTH <= len(nonce) <= 512):
+            raise HTTPException(status_code=400, detail="invalid_nonce")
+        scopes = scope.split()
+        if (
+            "openid" not in scopes
+            or len(scopes) != len(set(scopes))
+            or not set(scopes).issubset(client.scopes)
+            or not set(scopes).issubset(SUPPORTED_SCOPES)
+        ):
+            raise HTTPException(status_code=400, detail="invalid_scope")
 
-        req = store.create_login_request(
-            client_id=client_id,
-            redirect_uri=redirect_uri,
-            scope=scope or "openid",
-            state=state,
-            code_challenge=code_challenge,
-            code_challenge_method=code_challenge_method,
-            nonce=nonce,
-        )
+        try:
+            req = store.create_login_request(
+                client_id=client_id,
+                redirect_uri=redirect_uri,
+                scope=" ".join(scopes),
+                state=state,
+                code_challenge=code_challenge,
+                code_challenge_method=code_challenge_method,
+                nonce=nonce,
+            )
+        except OIDCStateUnavailableError:
+            raise HTTPException(status_code=503, detail="state_unavailable")
 
-        base_url = issuer_url()
+        base_url = expected_issuer
         html = _LOGIN_PAGE.format(
             base_url=base_url,
             request_id=req.request_id,
@@ -779,7 +913,11 @@ def build_oidc_router(
         claims = body.get("claims") or {}
         claims_sig = (body.get("claims_signature") or "").strip()
 
-        login_req = store.get_login_request(request_id)
+        _limit("complete", f"{_source(request)}:{fingerprint}")
+        try:
+            login_req = store.get_login_request(request_id)
+        except OIDCStateUnavailableError:
+            raise HTTPException(status_code=503, detail="state_unavailable")
         if login_req is None:
             raise HTTPException(status_code=400, detail="expired or unknown request")
         if len(fingerprint) not in (40, 64) or not nonce_sig or not nonce_id:
@@ -796,18 +934,27 @@ def build_oidc_router(
             claims_signature=claims_sig,
         )
         if not ok:
+            if err == "enrollment_unavailable":
+                raise HTTPException(status_code=503, detail=err)
+            if err == "fingerprint_not_approved":
+                raise HTTPException(status_code=403, detail=err)
             raise HTTPException(status_code=401, detail=err or "pgp_verification_failed")
 
-        # Consume the login request and mint a code bound to the verified id.
-        login_req = store.pop_login_request(request_id)
-        code_record = store.issue_code(login_req, fingerprint, oidc_claims)
+        try:
+            login_req, code_record = store.complete_login_request(
+                request_id, fingerprint, oidc_claims
+            )
+        except InvalidGrantError:
+            raise HTTPException(status_code=400, detail="expired_or_unknown_request")
+        except OIDCStateUnavailableError:
+            raise HTTPException(status_code=503, detail="state_unavailable")
 
         params = {"code": code_record.code}
         if login_req.state:
             params["state"] = login_req.state
         redirect_to = f"{login_req.redirect_uri}?{urlencode(params)}"
         logger.info("OIDC code issued for fp=%s client=%s", fingerprint[:8], login_req.client_id)
-        return {"redirect_to": redirect_to, "code": code_record.code}
+        return {"redirect_to": redirect_to}
 
     # ------------------------------------------------------------------
     # Passkey (WebAuthn) — convenience front-door bound to a PGP fingerprint
@@ -836,6 +983,10 @@ def build_oidc_router(
             claims_signature="",
         )
         if not ok:
+            if err == "enrollment_unavailable":
+                raise HTTPException(status_code=503, detail=err)
+            if err == "fingerprint_not_approved":
+                raise HTTPException(status_code=403, detail=err)
             raise HTTPException(status_code=401, detail=err or "pgp_verification_failed")
         ticket, options = passkeys.begin_registration(fingerprint)
         return {"ticket": ticket, "options": options}
@@ -858,7 +1009,11 @@ def build_oidc_router(
         body = await request.json()
         request_id = (body.get("request_id") or "").strip()
         fingerprint_hint = (body.get("fingerprint") or "").strip().upper()
-        if store.get_login_request(request_id) is None:
+        try:
+            login_req = store.get_login_request(request_id)
+        except OIDCStateUnavailableError:
+            raise HTTPException(status_code=503, detail="state_unavailable")
+        if login_req is None:
             raise HTTPException(status_code=400, detail="expired or unknown request")
         return passkeys.begin_authentication(request_id, fingerprint_hint)
 
@@ -867,7 +1022,10 @@ def build_oidc_router(
         body = await request.json()
         request_id = (body.get("request_id") or "").strip()
         credential = body.get("credential")
-        login_req = store.get_login_request(request_id)
+        try:
+            login_req = store.get_login_request(request_id)
+        except OIDCStateUnavailableError:
+            raise HTTPException(status_code=503, detail="state_unavailable")
         if login_req is None:
             raise HTTPException(status_code=400, detail="expired or unknown request")
         if not credential:
@@ -880,15 +1038,16 @@ def build_oidc_router(
         # The passkey resolves to a fingerprint; that key MUST already be an
         # approved CapAuth identity (it was enrolled when the passkey was
         # registered behind PGP proof). Refuse otherwise.
-        from ..app import get_keystore
-
-        existing = get_keystore().get(fingerprint)
-        if existing is None or not getattr(existing, "approved", True):
+        if not _current_identity(fingerprint):
             raise HTTPException(status_code=403, detail="fingerprint_not_approved")
 
-        login_req = store.pop_login_request(request_id)
         claims = {"amr": ["webauthn"]}
-        code_record = store.issue_code(login_req, fingerprint, claims)
+        try:
+            login_req, code_record = store.complete_login_request(request_id, fingerprint, claims)
+        except InvalidGrantError:
+            raise HTTPException(status_code=400, detail="expired_or_unknown_request")
+        except OIDCStateUnavailableError:
+            raise HTTPException(status_code=503, detail="state_unavailable")
         params = {"code": code_record.code}
         if login_req.state:
             params["state"] = login_req.state
@@ -896,7 +1055,7 @@ def build_oidc_router(
         logger.info(
             "OIDC code issued (passkey) for fp=%s client=%s", fingerprint[:8], login_req.client_id
         )
-        return {"redirect_to": redirect_to, "code": code_record.code}
+        return {"redirect_to": redirect_to}
 
     @router.get("/passkey/enroll", summary="Passkey enrollment page (PGP-gated)")
     async def passkey_enroll() -> Any:
@@ -949,21 +1108,24 @@ def build_oidc_router(
                 except Exception:
                     raise HTTPException(status_code=401, detail="invalid_client")
 
+        _limit("token", f"{_source(request)}:{client_id}")
         client = clients.get(client_id)
         if client is None or not client.secret_matches(client_secret):
             raise HTTPException(status_code=401, detail="invalid_client")
 
-        record = store.consume_code(code)
-        if record is None:
+        try:
+            record = store.consume_code(code, client_id, redirect_uri, code_verifier)
+        except InvalidGrantError:
             raise HTTPException(status_code=400, detail="invalid_grant")
-        if record.client_id != client_id:
-            raise HTTPException(status_code=400, detail="invalid_grant: client mismatch")
-        if redirect_uri and redirect_uri != record.redirect_uri:
-            raise HTTPException(status_code=400, detail="invalid_grant: redirect_uri mismatch")
-        if not verify_pkce(code_verifier, record.code_challenge, record.code_challenge_method):
-            raise HTTPException(status_code=400, detail="invalid_grant: PKCE verification failed")
+        except OIDCStateUnavailableError:
+            raise HTTPException(status_code=503, detail="state_unavailable")
 
-        iss = issuer_url()
+        try:
+            iss = issuer_url()
+            id_token_ttl = _bounded_ttl("CAPAUTH_OIDC_ID_TOKEN_TTL")
+            access_token_ttl = _bounded_ttl("CAPAUTH_OIDC_ACCESS_TOKEN_TTL")
+        except ValueError:
+            raise HTTPException(status_code=503, detail="configuration_unavailable")
         now = int(time.time())
         sub = record.fingerprint
 
@@ -972,7 +1134,7 @@ def build_oidc_router(
             "sub": sub,
             "aud": client_id,
             "iat": now,
-            "exp": now + ID_TOKEN_TTL,
+            "exp": now + id_token_ttl,
             # How the user actually authenticated: ["pgp"] (sovereign) or
             # ["webauthn"] (passkey convenience tier). Set when the code is minted.
             "amr": record.claims.get("amr", ["pgp"]),
@@ -996,27 +1158,38 @@ def build_oidc_router(
         id_claims.setdefault("preferred_username", preferred_username_fallback(sub))
 
         headers = {"kid": signing_key.kid}
-        id_token = pyjwt.encode(
-            id_claims, signing_key.private_pem, algorithm=signing_key.ALGORITHM, headers=headers
-        )
-
-        # Access token: a JWT carrying claims so /userinfo is self-contained.
+        jti = secrets.token_urlsafe(24)
         access_claims = dict(id_claims)
-        access_claims["exp"] = now + ACCESS_TOKEN_TTL
+        access_claims["exp"] = now + access_token_ttl
         access_claims["token_use"] = "access"
-        access_token = pyjwt.encode(
-            access_claims,
-            signing_key.private_pem,
-            algorithm=signing_key.ALGORITHM,
-            headers=headers,
-        )
+        access_claims["jti"] = jti
+        access_claims["scope"] = record.scope
+        try:
+            id_token = pyjwt.encode(
+                id_claims,
+                signing_key.private_pem,
+                algorithm=signing_key.ALGORITHM,
+                headers=headers,
+            )
+            access_token = pyjwt.encode(
+                access_claims,
+                signing_key.private_pem,
+                algorithm=signing_key.ALGORITHM,
+                headers=headers,
+            )
+        except Exception:
+            raise HTTPException(status_code=503, detail="signer_unavailable")
+        try:
+            store.register_access_token(jti, sub, client_id, now + access_token_ttl)
+        except OIDCStateUnavailableError:
+            raise HTTPException(status_code=503, detail="state_unavailable")
 
         logger.info("OIDC token issued for fp=%s client=%s", sub[:8], client_id)
         return {
             "access_token": access_token,
             "id_token": id_token,
             "token_type": "Bearer",
-            "expires_in": ACCESS_TOKEN_TTL,
+            "expires_in": access_token_ttl,
             "scope": record.scope,
         }
 
@@ -1030,20 +1203,26 @@ def build_oidc_router(
         if not auth.startswith("Bearer "):
             raise HTTPException(status_code=401, detail="missing bearer token")
         token_str = auth[len("Bearer ") :]
-        try:
-            payload = pyjwt.decode(
-                token_str,
-                signing_key.public_pem,
-                algorithms=[signing_key.ALGORITHM],
-                audience=None,
-                options={"verify_aud": False, "require": ["sub", "iss", "exp"]},
-            )
-        except pyjwt.ExpiredSignatureError:
-            raise HTTPException(status_code=401, detail="token_expired")
-        except pyjwt.InvalidTokenError as exc:
-            raise HTTPException(status_code=401, detail=f"invalid_token: {exc}")
+        payload = _decode_access_token(token_str)
 
-        drop = {"iat", "exp", "iss", "aud", "token_use", "nonce"}
+        drop = {"iat", "exp", "iss", "aud", "token_use", "nonce", "jti", "scope"}
         return {k: v for k, v in payload.items() if k not in drop}
+
+    @router.post("/logout", summary="Revoke the current OIDC access token")
+    @router.post("/revoke", summary="Revoke the current OIDC access token")
+    async def revoke(request: Request) -> dict[str, bool]:
+        _limit("logout", _source(request))
+        auth = request.headers.get("Authorization", "")
+        if not auth.startswith("Bearer "):
+            raise HTTPException(status_code=401, detail="missing_bearer_token")
+        payload = _decode_access_token(auth[len("Bearer ") :])
+        _limit("logout", f"{_source(request)}:{payload['sub']}")
+        try:
+            revoked = store.revoke_access_token(payload["jti"])
+        except OIDCStateUnavailableError:
+            raise HTTPException(status_code=503, detail="currentness_unavailable")
+        if not revoked:
+            raise HTTPException(status_code=401, detail="token_not_current")
+        return {"revoked": True}
 
     return router

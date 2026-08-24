@@ -59,6 +59,10 @@ All notable changes to `capauth` are documented here. The format is based on
 
 ### Fixed
 
+- Fixed Authentik detached OpenPGP verification to use mandatory PGPy when the
+  optional `python-gnupg` module is unavailable, while preserving the existing
+  GnuPG path (card `6aa4a774`).
+
 - Restored the declared Python 3.10 support for delegated capabilities by using
   compatible UTC, string-enum, `Never`, and `Self` definitions. Downstream
   SKVault installs can again complete their full 3.10 test gate.

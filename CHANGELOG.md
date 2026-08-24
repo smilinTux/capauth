@@ -6,6 +6,12 @@ All notable changes to `capauth` are documented here. The format is based on
 
 ## [Unreleased]
 
+- Scoped pull-request and push secret scans to protected `main` plus the exact
+  event commit range so unrelated abandoned refs cannot poison clean changes.
+  Scheduled and manual runs retain an explicit all-ref scan, and a runnable
+  negative control proves both isolation and leak sensitivity without changing
+  the committed baseline or detector rules.
+
 - Recorded the verified 2026-08-20 Chef custody/signing ceremony and the
   deferred passphrase-disclosure response (`da8a6401`) in the human identity
   runbook, including the safe hidden-input pattern and honest residual-risk

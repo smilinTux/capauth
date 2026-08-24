@@ -139,6 +139,7 @@ service/node signers separately; do not use public sync as private-key recovery.
 | **Peer mesh** | Discover and verify sovereign peers over mDNS, shared filesystem, and Syncthing — no servers (`capauth mesh`, `discover`, `peers`) |
 | **PMA membership** | Fiducia Communitatis — PGP-signed, steward-countersigned membership claims (`capauth pma request/approve/verify/revoke`) |
 | **Delegated capabilities** | Strict complete-chain validation with current issuer, principal, revocation, replay, attenuation, exact-scope, and sanitized-decision interfaces (`capauth.delegated`) |
+| **Control-plane decisions** | Stateless canonical-bearer composition that joins delegated CapAuth and owner policy into a sanitized attributable result (`capauth.control_plane_authorizer`) |
 | **Org registry** | Register with a sovereign org; emits a signed registry entry + PMA request (`capauth register`) |
 | **Integration generators** | One-shot config for third-party login, e.g. Forgejo OAuth2/OIDC (`capauth setup forgejo`) |
 | **skcapstone adapter** | Default-on-by-presence: routes auth events to `sk-alert`, registers a key-rotation check with `skscheduler` |

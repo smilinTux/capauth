@@ -74,6 +74,44 @@ Only two resolved allows produce an allow. A CapAuth denial and an owner denial
 remain `deny`. Insufficient owner evidence remains `unknown`. An unreachable
 CapAuth or owner policy remains `unavailable`. All three are non-allow outcomes.
 
+## Typed authorizer composition
+
+`capauth.control_plane_authorizer.ControlPlaneDecisionAuthorizer` is the
+published dependency-injected composition for this boundary. It accepts only a
+canonical padded URL-safe base64 encoding of the delegated authorization
+transport, bounded to 64 KiB. Raw JSON, missing padding, whitespace, alternate
+alphabets, malformed UTF-8, duplicate members, and oversized input fail closed
+without echoing the input.
+
+The caller supplies trusted invocation facts and a `RequestBoundary`; identity,
+owner revision, and expiry come only from the signed delegated capability. The
+authorizer reconstructs the exact `ControlPlaneBinding`, validates the boundary
+before consuming the one-use capability, calls the existing injected
+`CapabilityAuthorizer`, and then asks an injected `OwnerPolicyProvider` twice.
+An initial allow also returns an opaque, HMAC-bound, one-use currentness receipt.
+The authorizer reads owner policy once, uses
+`CapabilityAuthorizer.revalidate_current` with that receipt to recheck the same
+already-verified chain against current issuer, principal, revocation, and time
+state without another replay reservation or signature pass, then reads owner
+policy again. The receipt is process-local, bounded, expiry-pruned, redacted,
+nonserializable, and invalid after one use or an authorizer restart. Only two
+identical owner decisions bracketing that revalidation and the still-current
+delegated allow produce
+`SanitizedControlPlaneDecisionV1`. The context contains the binding, boundary,
+sanitized delegated and joined decisions, UTC issue and expiry times, and a
+domain-separated authenticated identity reference. It omits the raw owner
+decision and its provider-controlled reason text, as well as the bearer, raw
+token, signature, and capability chain.
+
+Every non-allow result contains only `allow`, broad truth state, broad decision
+code, and a null context. Owner reason text, resource identity, principal,
+policy revision, and credential details are not returned on denial, Unknown, or
+unavailability. The composition stores no latest request or decision and adds
+no default backend. Production callers must inject durable issuer, principal,
+revocation, replay, audit, signature-verification, and owner-policy
+implementations. The included in-memory backends remain test and isolated
+development tools only.
+
 ## Request boundary and browser controls
 
 Origin, CSRF, TTL, client kind, and mutation idempotency checks run before

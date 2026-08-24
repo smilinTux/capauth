@@ -103,6 +103,18 @@ domain-separated authenticated identity reference. It omits the raw owner
 decision and its provider-controlled reason text, as well as the bearer, raw
 token, signature, and capability chain.
 
+Callers that must perform a protected owner read after authorization use
+`authorize_with_currentness`. It returns the same sanitized result plus an
+opaque request-local `ControlPlaneCurrentnessVerifier`. The caller must pass the
+exact context object to `check_before_owner_read`, keep the owner result private,
+then pass the same object to `check_after_owner_read` before releasing output.
+The locked verifier enforces that order, consumes two distinct authorizer-bound
+receipts, and returns `allow`, `deny`, or `unavailable` without policy detail.
+Any wrong order, copied context, current-state failure, or close invalidates its
+unused receipt and releases the privately held capability chain. Middleware must
+call `close` in `finally`. This brackets but does not replace the owner system's
+own atomic policy-revision read boundary.
+
 Every non-allow result contains only `allow`, broad truth state, broad decision
 code, and a null context. Owner reason text, resource identity, principal,
 policy revision, and credential details are not returned on denial, Unknown, or

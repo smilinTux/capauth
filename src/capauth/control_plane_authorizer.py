@@ -4,9 +4,12 @@ from __future__ import annotations
 
 import base64
 import hashlib
+import hmac
 import json
+import secrets
 from collections.abc import Callable
 from datetime import datetime, timedelta, timezone
+from threading import Lock
 from typing import Literal, Protocol
 
 from pydantic import Field, field_serializer, model_validator
@@ -25,6 +28,7 @@ from .control_plane import (
     validate_request_boundary,
 )
 from .delegated import (
+    AuthorizationCurrentnessReceipt,
     AuthorizationDecision,
     AuthorizationDeniedError,
     AuthorizationReceiptError,
@@ -42,6 +46,7 @@ from .delegated import (
 UTC = timezone.utc
 MAX_CONTROL_PLANE_BEARER_BYTES = 64 * 1024
 MAX_CONTROL_PLANE_TTL = timedelta(minutes=5)
+MAX_CONTROL_PLANE_CURRENTNESS_VERIFIERS = 1024
 
 
 class ControlPlaneInvocationV1(StrictValue):
@@ -176,6 +181,190 @@ class ControlPlaneAuthorizationResultV1(StrictValue):
         return self
 
 
+_CURRENTNESS_FACTORY = object()
+
+
+class ControlPlaneCurrentnessVerifier:
+    """Opaque request-local verifier for two downstream currentness checks."""
+
+    __slots__ = (
+        "_authorizer",
+        "_context",
+        "_context_fingerprint",
+        "_issuer",
+        "_issue_mac",
+        "_issue_nonce",
+        "_lock",
+        "_owns_receipts",
+        "_phase",
+        "_presented",
+        "_prior",
+        "_receipts",
+        "_request",
+    )
+
+    def __init__(
+        self,
+        factory_token: object,
+        *,
+        issuer: "ControlPlaneDecisionAuthorizer",
+        issue_nonce: bytes,
+        issue_mac: bytes,
+        authorizer: CapabilityAuthorizer,
+        presented: PresentedCapability,
+        request: AuthorizationRequest,
+        prior: AuthorizationDecision,
+        context: SanitizedControlPlaneDecisionV1,
+        receipts: tuple[AuthorizationCurrentnessReceipt, ...],
+    ) -> None:
+        if (
+            factory_token is not _CURRENTNESS_FACTORY
+            or type(issuer) is not ControlPlaneDecisionAuthorizer
+            or len(issue_nonce) != 32
+            or len(issue_mac) != 32
+            or type(authorizer) is not CapabilityAuthorizer
+            or not isinstance(presented, PresentedCapability)
+            or not isinstance(request, AuthorizationRequest)
+            or not isinstance(prior, AuthorizationDecision)
+            or not isinstance(context, SanitizedControlPlaneDecisionV1)
+            or len(receipts) != 2
+            or any(not isinstance(value, AuthorizationCurrentnessReceipt) for value in receipts)
+        ):
+            raise TypeError("control-plane currentness verifiers are authorizer-issued")
+        object.__setattr__(self, "_authorizer", authorizer)
+        object.__setattr__(self, "_issuer", issuer)
+        object.__setattr__(self, "_issue_nonce", bytes(issue_nonce))
+        object.__setattr__(self, "_issue_mac", bytes(issue_mac))
+        object.__setattr__(self, "_presented", presented)
+        object.__setattr__(self, "_request", request)
+        object.__setattr__(self, "_prior", prior)
+        object.__setattr__(self, "_context", context)
+        object.__setattr__(self, "_context_fingerprint", _context_fingerprint(context))
+        object.__setattr__(self, "_receipts", tuple(receipts))
+        object.__setattr__(self, "_lock", Lock())
+        object.__setattr__(self, "_owns_receipts", False)
+        object.__setattr__(self, "_phase", 0)
+
+    def __setattr__(self, name, value) -> None:
+        del name, value
+        raise AttributeError("control-plane currentness verifier is immutable")
+
+    def check_before_owner_read(self, context: SanitizedControlPlaneDecisionV1) -> DecisionState:
+        """Consume the pre-read proof for the exact issued context."""
+
+        return self._check(context, expected_phase=0)
+
+    def check_after_owner_read(self, context: SanitizedControlPlaneDecisionV1) -> DecisionState:
+        """Consume the post-read proof before protected output is released."""
+
+        return self._check(context, expected_phase=1)
+
+    def _check(
+        self,
+        context: SanitizedControlPlaneDecisionV1,
+        *,
+        expected_phase: int,
+    ) -> DecisionState:
+        with self._lock:
+            if (
+                self._phase != expected_phase
+                or context is not self._context
+                or len(self._receipts) != 2
+            ):
+                self._close_locked()
+                return DecisionState.DENY
+            try:
+                fingerprint = _context_fingerprint(context)
+            except Exception:
+                self._close_locked()
+                return DecisionState.DENY
+            if fingerprint != self._context_fingerprint:
+                self._close_locked()
+                return DecisionState.DENY
+            try:
+                issued = self._issuer._claim_currentness_verifier(
+                    self._issue_nonce,
+                    self._issue_mac,
+                    context,
+                    verifier=self,
+                    expected_phase=expected_phase,
+                )
+            except Exception:
+                self._close_locked()
+                return DecisionState.UNAVAILABLE
+            if not issued:
+                self._close_locked()
+                return DecisionState.DENY
+            object.__setattr__(self, "_owns_receipts", True)
+            receipt = self._receipts[expected_phase]
+            try:
+                current = self._authorizer.revalidate_current(
+                    self._presented,
+                    self._request,
+                    self._prior,
+                    receipt,
+                )
+                state = DecisionState.ALLOW if current is self._prior else DecisionState.DENY
+            except AuthorizationDeniedError as exc:
+                self._authorizer.discard_currentness_receipts((receipt,))
+                state = _capauth_denial(exc.decision.reason).state
+            except AuthorizationReceiptError:
+                self._authorizer.discard_currentness_receipts((receipt,))
+                state = DecisionState.DENY
+            except AuthorizationReceiptUnavailableError:
+                self._authorizer.discard_currentness_receipts((receipt,))
+                state = DecisionState.UNAVAILABLE
+            except Exception:
+                self._authorizer.discard_currentness_receipts((receipt,))
+                state = DecisionState.UNAVAILABLE
+            if state is not DecisionState.ALLOW or expected_phase == 1:
+                self._close_locked()
+            else:
+                object.__setattr__(self, "_phase", 1)
+            return state
+
+    def close(self) -> None:
+        """Invalidate unused proofs and release request credential material."""
+
+        with self._lock:
+            self._close_locked()
+
+    def _close_locked(self) -> None:
+        if self._phase == 2:
+            return
+        registered = self._issuer._discard_currentness_verifier(
+            self._issue_nonce,
+            verifier=self,
+        )
+        if self._owns_receipts or registered:
+            self._authorizer.discard_currentness_receipts(tuple(self._receipts))
+        object.__setattr__(self, "_receipts", ())
+        object.__setattr__(self, "_presented", None)
+        object.__setattr__(self, "_request", None)
+        object.__setattr__(self, "_prior", None)
+        object.__setattr__(self, "_context", None)
+        object.__setattr__(self, "_context_fingerprint", b"")
+        object.__setattr__(self, "_issue_nonce", b"")
+        object.__setattr__(self, "_issue_mac", b"")
+        object.__setattr__(self, "_owns_receipts", False)
+        object.__setattr__(self, "_phase", 2)
+
+    def __repr__(self) -> str:
+        return "<opaque control-plane currentness verifier>"
+
+    __str__ = __repr__
+
+    def __copy__(self):
+        raise TypeError("control-plane currentness verifier cannot be copied")
+
+    def __deepcopy__(self, memo):
+        del memo
+        raise TypeError("control-plane currentness verifier cannot be copied")
+
+    def __reduce__(self):
+        raise TypeError("control-plane currentness verifier cannot be serialized")
+
+
 def export_control_plane_bearer(presented: PresentedCapability) -> str:
     """Encode delegated transport in the canonical padded browser handoff form."""
 
@@ -207,7 +396,15 @@ def parse_control_plane_bearer(bearer: str) -> PresentedCapability:
 class ControlPlaneDecisionAuthorizer:
     """Compose delegated CapAuth and resource-owner policy without storing requests."""
 
-    __slots__ = ("_allowed_origins", "_authorizer", "_clock", "_owner_policy")
+    __slots__ = (
+        "_allowed_origins",
+        "_authorizer",
+        "_clock",
+        "_owner_policy",
+        "_verifier_key",
+        "_verifier_lock",
+        "_verifier_states",
+    )
 
     def __init__(
         self,
@@ -225,6 +422,118 @@ class ControlPlaneDecisionAuthorizer:
         self._owner_policy = owner_policy
         self._allowed_origins = frozenset(allowed_origins)
         self._clock = clock or (lambda: datetime.now(UTC))
+        self._verifier_key = secrets.token_bytes(32)
+        self._verifier_lock = Lock()
+        self._verifier_states = {}
+
+    def _register_currentness_verifier(
+        self,
+        context: SanitizedControlPlaneDecisionV1,
+    ) -> tuple[bytes, bytes]:
+        now = _utc(self._clock())
+        fingerprint = _context_fingerprint(context)
+        with self._verifier_lock:
+            self._verifier_states = {
+                nonce: state for nonce, state in self._verifier_states.items() if state[0] > now
+            }
+            if len(self._verifier_states) >= MAX_CONTROL_PLANE_CURRENTNESS_VERIFIERS:
+                raise RuntimeError("control-plane currentness verifier capacity exhausted")
+            for _attempt in range(16):
+                nonce = secrets.token_bytes(32)
+                if nonce in self._verifier_states:
+                    continue
+                mac = self._currentness_verifier_mac(nonce, fingerprint)
+                self._verifier_states[nonce] = (
+                    context.expires_at,
+                    0,
+                    id(context),
+                    fingerprint,
+                    mac,
+                    None,
+                )
+                return nonce, mac
+        raise RuntimeError("control-plane currentness verifier nonce unavailable")
+
+    def _bind_currentness_verifier(
+        self,
+        nonce: bytes,
+        mac: bytes,
+        context: SanitizedControlPlaneDecisionV1,
+        verifier: ControlPlaneCurrentnessVerifier,
+    ) -> bool:
+        fingerprint = _context_fingerprint(context)
+        with self._verifier_lock:
+            state = self._verifier_states.get(nonce)
+            valid = (
+                state is not None
+                and state[1] == 0
+                and state[2] == id(context)
+                and state[3] == fingerprint
+                and hmac.compare_digest(state[4], mac)
+                and state[5] is None
+            )
+            if not valid:
+                self._verifier_states.pop(nonce, None)
+                return False
+            self._verifier_states[nonce] = (*state[:5], id(verifier))
+            return True
+
+    def _claim_currentness_verifier(
+        self,
+        nonce: bytes,
+        mac: bytes,
+        context: SanitizedControlPlaneDecisionV1,
+        *,
+        verifier: ControlPlaneCurrentnessVerifier,
+        expected_phase: int,
+    ) -> bool:
+        now = _utc(self._clock())
+        fingerprint = _context_fingerprint(context)
+        with self._verifier_lock:
+            state = self._verifier_states.get(nonce)
+            self._verifier_states = {
+                value: item for value, item in self._verifier_states.items() if item[0] > now
+            }
+            if state is None or state[0] <= now:
+                return False
+            valid_mac = hmac.compare_digest(
+                mac,
+                self._currentness_verifier_mac(nonce, fingerprint),
+            )
+            valid = (
+                valid_mac
+                and state[1] == expected_phase
+                and state[2] == id(context)
+                and state[3] == fingerprint
+                and hmac.compare_digest(state[4], mac)
+                and state[5] == id(verifier)
+            )
+            if not valid:
+                return False
+            if expected_phase == 0:
+                self._verifier_states[nonce] = (state[0], 1, *state[2:])
+            else:
+                self._verifier_states.pop(nonce, None)
+            return True
+
+    def _discard_currentness_verifier(
+        self,
+        nonce: bytes,
+        *,
+        verifier: ControlPlaneCurrentnessVerifier | None = None,
+    ) -> bool:
+        with self._verifier_lock:
+            state = self._verifier_states.get(nonce)
+            if verifier is not None and state is not None and state[5] != id(verifier):
+                return False
+            return self._verifier_states.pop(nonce, None) is not None
+
+    def _currentness_verifier_mac(self, nonce: bytes, fingerprint: bytes) -> bytes:
+        return hmac.new(
+            self._verifier_key,
+            b"capauth-control-plane-currentness-verifier/v1\0" + nonce + fingerprint,
+            hashlib.sha256,
+        ).digest()
 
     def authorize(
         self,
@@ -233,9 +542,41 @@ class ControlPlaneDecisionAuthorizer:
     ) -> ControlPlaneAuthorizationResultV1:
         """Return one sanitized typed result and never retain the bearer."""
 
+        result, verifier = self._authorize(bearer, invocation, issue_verifier=False)
+        if verifier is not None:
+            verifier.close()
+        return result
+
+    def authorize_with_currentness(
+        self,
+        bearer: str,
+        invocation: ControlPlaneInvocationV1,
+    ) -> tuple[ControlPlaneAuthorizationResultV1, ControlPlaneCurrentnessVerifier | None]:
+        """Return a sanitized result and two-use opaque downstream verifier."""
+
+        return self._authorize(bearer, invocation, issue_verifier=True)
+
+    def _authorize(
+        self,
+        bearer: str,
+        invocation: ControlPlaneInvocationV1,
+        *,
+        issue_verifier: bool,
+    ) -> tuple[ControlPlaneAuthorizationResultV1, ControlPlaneCurrentnessVerifier | None]:
+        active_receipts = ()
+        downstream_receipts = ()
+        registered_nonce = b""
+
+        def closed(
+            result: ControlPlaneAuthorizationResultV1,
+        ) -> tuple[ControlPlaneAuthorizationResultV1, None]:
+            self._authorizer.discard_currentness_receipts(active_receipts + downstream_receipts)
+            self._discard_currentness_verifier(registered_nonce)
+            return result, None
+
         denied = _result(DecisionState.DENY, DecisionCode.CAPAUTH_DENIED)
         if not isinstance(invocation, ControlPlaneInvocationV1):
-            return denied
+            return closed(denied)
         try:
             presented = parse_control_plane_bearer(bearer)
             leaf_raw = presented.credentials_for_verification()[-1]
@@ -245,7 +586,7 @@ class ControlPlaneDecisionAuthorizer:
             expires_at = _utc(leaf.token.payload.expires_at)
             now = _utc(self._clock())
         except Exception:
-            return denied
+            return closed(denied)
 
         boundary_code = validate_request_boundary(
             binding,
@@ -254,9 +595,9 @@ class ControlPlaneDecisionAuthorizer:
             as_of=now,
         )
         if boundary_code is not None:
-            return _result(DecisionState.DENY, boundary_code)
+            return closed(_result(DecisionState.DENY, boundary_code))
         if not issued_at <= now < expires_at:
-            return _result(DecisionState.DENY, DecisionCode.EXPIRED)
+            return closed(_result(DecisionState.DENY, DecisionCode.EXPIRED))
 
         request = AuthorizationRequest(
             principal=binding.principal,
@@ -265,49 +606,64 @@ class ControlPlaneDecisionAuthorizer:
         )
         try:
             capauth, receipt = self._authorizer.authorize_with_receipt(presented, request)
+            active_receipts = (receipt,)
         except AuthorizationDeniedError as exc:
-            return _capauth_denial(exc.decision.reason)
+            return closed(_capauth_denial(exc.decision.reason))
         except AuthorizationReceiptUnavailableError:
-            return _result(DecisionState.UNAVAILABLE, DecisionCode.CAPAUTH_UNAVAILABLE)
+            return closed(_result(DecisionState.UNAVAILABLE, DecisionCode.CAPAUTH_UNAVAILABLE))
         except Exception:
-            return _result(DecisionState.UNAVAILABLE, DecisionCode.CAPAUTH_UNAVAILABLE)
+            return closed(_result(DecisionState.UNAVAILABLE, DecisionCode.CAPAUTH_UNAVAILABLE))
 
         try:
             now = _utc(self._clock())
         except Exception:
-            return _result(DecisionState.UNAVAILABLE, DecisionCode.CAPAUTH_UNAVAILABLE)
+            return closed(_result(DecisionState.UNAVAILABLE, DecisionCode.CAPAUTH_UNAVAILABLE))
         if not issued_at <= now < expires_at:
-            return _result(DecisionState.DENY, DecisionCode.EXPIRED)
+            return closed(_result(DecisionState.DENY, DecisionCode.EXPIRED))
 
         first = self._owner_decision(binding, capauth)
         if first is None:
-            return _result(DecisionState.UNAVAILABLE, DecisionCode.OWNER_POLICY_UNAVAILABLE)
+            return closed(
+                _result(DecisionState.UNAVAILABLE, DecisionCode.OWNER_POLICY_UNAVAILABLE)
+            )
         first_joined = join_policy_decisions(binding, capauth, first)
         if not first_joined.allow:
-            return _result(first_joined.state, first_joined.code)
+            return closed(_result(first_joined.state, first_joined.code))
         try:
-            capauth = self._authorizer.revalidate_current(presented, request, capauth, receipt)
+            if issue_verifier:
+                capauth, downstream_receipts = self._authorizer.revalidate_current_with_receipts(
+                    presented,
+                    request,
+                    capauth,
+                    receipt,
+                    count=2,
+                )
+            else:
+                capauth = self._authorizer.revalidate_current(presented, request, capauth, receipt)
+            active_receipts = ()
         except AuthorizationReceiptError:
-            return _result(DecisionState.DENY, DecisionCode.CAPAUTH_DENIED)
+            return closed(_result(DecisionState.DENY, DecisionCode.CAPAUTH_DENIED))
         except AuthorizationDeniedError as exc:
             if exc.decision.reason is DecisionReason.EXPIRED:
-                return _result(DecisionState.DENY, DecisionCode.EXPIRED)
-            return _capauth_denial(exc.decision.reason)
+                return closed(_result(DecisionState.DENY, DecisionCode.EXPIRED))
+            return closed(_capauth_denial(exc.decision.reason))
         except Exception:
-            return _result(DecisionState.UNAVAILABLE, DecisionCode.CAPAUTH_UNAVAILABLE)
+            return closed(_result(DecisionState.UNAVAILABLE, DecisionCode.CAPAUTH_UNAVAILABLE))
         second = self._owner_decision(binding, capauth)
         if second is None:
-            return _result(DecisionState.UNAVAILABLE, DecisionCode.OWNER_POLICY_UNAVAILABLE)
+            return closed(
+                _result(DecisionState.UNAVAILABLE, DecisionCode.OWNER_POLICY_UNAVAILABLE)
+            )
         if first != second:
-            return _result(DecisionState.DENY, DecisionCode.BINDING_MISMATCH)
+            return closed(_result(DecisionState.DENY, DecisionCode.BINDING_MISMATCH))
         joined = join_policy_decisions(binding, capauth, second)
         if not joined.allow:
-            return _result(joined.state, joined.code)
+            return closed(_result(joined.state, joined.code))
 
         try:
             now = _utc(self._clock())
             if not issued_at <= now < expires_at:
-                return _result(DecisionState.DENY, DecisionCode.EXPIRED)
+                return closed(_result(DecisionState.DENY, DecisionCode.EXPIRED))
             context = SanitizedControlPlaneDecisionV1(
                 binding=binding,
                 boundary=invocation.boundary,
@@ -318,13 +674,40 @@ class ControlPlaneDecisionAuthorizer:
                 expires_at=expires_at,
             )
         except Exception:
-            return _result(DecisionState.DENY, DecisionCode.BINDING_MISMATCH)
-        return ControlPlaneAuthorizationResultV1(
+            return closed(_result(DecisionState.DENY, DecisionCode.BINDING_MISMATCH))
+        result = ControlPlaneAuthorizationResultV1(
             allow=True,
             state=DecisionState.ALLOW,
             code=DecisionCode.ALLOW,
             context=context,
         )
+        if not issue_verifier:
+            return result, None
+        try:
+            registered_nonce, issue_mac = self._register_currentness_verifier(context)
+            verifier = ControlPlaneCurrentnessVerifier(
+                _CURRENTNESS_FACTORY,
+                issuer=self,
+                issue_nonce=registered_nonce,
+                issue_mac=issue_mac,
+                authorizer=self._authorizer,
+                presented=presented,
+                request=request,
+                prior=capauth,
+                context=context,
+                receipts=downstream_receipts,
+            )
+            if not self._bind_currentness_verifier(
+                registered_nonce,
+                issue_mac,
+                context,
+                verifier,
+            ):
+                raise RuntimeError("control-plane currentness verifier binding failed")
+            registered_nonce = b""
+        except Exception:
+            return closed(_result(DecisionState.UNAVAILABLE, DecisionCode.CAPAUTH_UNAVAILABLE))
+        return result, verifier
 
     def _owner_decision(
         self,
@@ -425,6 +808,16 @@ def _identity_ref(binding: ControlPlaneBinding, decision: AuthorizationDecision)
     return f"sha256:{hashlib.sha256(encoded).hexdigest()}"
 
 
+def _context_fingerprint(context: SanitizedControlPlaneDecisionV1) -> bytes:
+    encoded = json.dumps(
+        context.model_dump(mode="json"),
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=True,
+    ).encode("ascii")
+    return hashlib.sha256(encoded).digest()
+
+
 def _utc(value: datetime | None) -> datetime:
     if value is None or value.tzinfo is None or value.utcoffset() != timedelta(0):
         raise ValueError("time must use UTC offset zero")
@@ -449,6 +842,7 @@ def _result(
 __all__ = [
     "MAX_CONTROL_PLANE_BEARER_BYTES",
     "ControlPlaneAuthorizationResultV1",
+    "ControlPlaneCurrentnessVerifier",
     "ControlPlaneDecisionAuthorizer",
     "ControlPlaneInvocationV1",
     "OwnerPolicyProvider",

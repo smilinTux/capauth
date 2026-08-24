@@ -286,6 +286,9 @@ root of trust; the passkey is easy-mode.
   passkey" button sits on `/oidc/authorize`; browser helpers at `/oidc/passkey.js`.
 - **Store:** `oidc/passkey.py` `PasskeyStore` — persisted credentials (keyed by
   credential id → fingerprint + public key + sign count), in-memory ceremony
-  challenges. RP id/origin derive from the issuer. Dep: `webauthn` (capauth[service]).
+  challenges. Set `CAPAUTH_DATA_DIR` to an explicit durable directory writable
+  only by the CapAuth service identity. Registration and authentication fail
+  closed if this state cannot be read or atomically persisted. RP id/origin
+  derive from the issuer. Dep: `webauthn` (capauth[service]).
 - **Verified:** full register→login ceremony in Python (soft-webauthn) AND live
   in a browser with a virtual authenticator → a passkey login minted an OIDC code.

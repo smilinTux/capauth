@@ -46,6 +46,10 @@ RP_NAME = "CapAuth"
 _CHALLENGE_TTL = 300  # seconds for a pending reg/auth ceremony
 
 
+class PasskeyStoreUnavailableError(RuntimeError):
+    """Durable passkey state cannot be read or written safely."""
+
+
 def rp_origin_and_id() -> tuple[str, str]:
     """Return ``(origin, rp_id)`` derived from the IdP issuer.
 
@@ -77,17 +81,34 @@ class PasskeyStore:
     # -- persistence ------------------------------------------------------
 
     def _load(self) -> dict[str, dict]:
-        try:
-            return json.loads(self._path.read_text())
-        except Exception:
+        if not self._path.exists():
             return {}
+        try:
+            data = json.loads(self._path.read_text(encoding="utf-8"))
+        except (OSError, ValueError) as exc:
+            raise PasskeyStoreUnavailableError("passkey state unavailable") from exc
+        if not isinstance(data, dict):
+            raise PasskeyStoreUnavailableError("passkey state is not an object")
+        return data
 
     def _save(self) -> None:
+        tmp = self._path.with_name(f".{self._path.name}.tmp-{os.getpid()}-{secrets.token_hex(4)}")
         try:
-            self._dir.mkdir(parents=True, exist_ok=True)
-            self._path.write_text(json.dumps(self._creds))
-        except Exception as exc:  # pragma: no cover
-            logger.warning("passkey: could not persist credentials: %s", exc)
+            self._dir.mkdir(mode=0o700, parents=True, exist_ok=True)
+            fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+            try:
+                payload = json.dumps(self._creds, sort_keys=True).encode("utf-8")
+                os.write(fd, payload)
+                os.fsync(fd)
+            finally:
+                os.close(fd)
+            os.replace(tmp, self._path)
+        except OSError as exc:
+            try:
+                tmp.unlink(missing_ok=True)
+            except OSError:
+                pass
+            raise PasskeyStoreUnavailableError("passkey state unavailable") from exc
 
     def credentials_for(self, fingerprint: str) -> list[str]:
         fp = (fingerprint or "").upper()
@@ -145,12 +166,21 @@ class PasskeyStore:
         )
         cid = bytes_to_base64url(verification.credential_id)
         with self._lock:
-            self._creds[cid] = {
+            new_credential = {
                 "fingerprint": rec["fingerprint"],
                 "public_key": bytes_to_base64url(verification.credential_public_key),
                 "sign_count": verification.sign_count,
             }
-            self._save()
+            previous = self._creds.get(cid)
+            self._creds[cid] = new_credential
+            try:
+                self._save()
+            except PasskeyStoreUnavailableError:
+                if previous is None:
+                    self._creds.pop(cid, None)
+                else:
+                    self._creds[cid] = previous
+                raise
         logger.info("passkey registered for fp=%s", rec["fingerprint"][:8])
         return rec["fingerprint"], cid
 
@@ -203,7 +233,12 @@ class PasskeyStore:
             require_user_verification=False,
         )
         with self._lock:
+            previous_count = stored["sign_count"]
             stored["sign_count"] = verification.new_sign_count
-            self._save()
+            try:
+                self._save()
+            except PasskeyStoreUnavailableError:
+                stored["sign_count"] = previous_count
+                raise
         logger.info("passkey login for fp=%s", stored["fingerprint"][:8])
         return stored["fingerprint"]

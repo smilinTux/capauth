@@ -398,7 +398,8 @@ def mint_audience_token(
     audience: str,
     scopes: list[str],
     *,
-    ttl_hours: int = 1,
+    ttl_hours: Optional[int] = None,
+    ttl_seconds: Optional[int] = None,
     metadata: Optional[dict] = None,
     sign: bool = True,
     store: bool = True,
@@ -424,6 +425,9 @@ def mint_audience_token(
         audience: The subapp id the token is scoped to (e.g. "skchat").
         scopes: The granted scope strings (become ``capabilities``).
         ttl_hours: Hours until expiry (default 1; the shell re-mints).
+        ttl_seconds: Bounded non-persistent lifetime in seconds. When set, it
+            must be 1 through 300, ``store`` must be false, and signing must be
+            enabled. It cannot be combined with ``ttl_hours``.
         metadata: Additional claims to embed.
         sign: Whether to PGP-sign the token. See :func:`issue_token` for what
             ``sign=False`` means for authorization (the PDP rejects it).
@@ -440,8 +444,24 @@ def mint_audience_token(
         TokenSigningError: If ``sign`` is True and gpg produced no signature.
             Nothing is written to the token store in that case.
     """
+    if ttl_seconds is not None:
+        if ttl_hours is not None:
+            raise ValueError("ttl_seconds and ttl_hours are mutually exclusive")
+        if type(ttl_seconds) is not int or not 1 <= ttl_seconds <= 300:
+            raise ValueError("ttl_seconds must be an integer between 1 and 300")
+        if store:
+            raise ValueError("ttl_seconds tokens must use store=False")
+        if not sign:
+            raise ValueError("ttl_seconds tokens must be signed")
+
     issuer_fp = _get_issuer_fingerprint(home)
     now = datetime.now(timezone.utc)
+    if ttl_seconds is not None:
+        lifetime = timedelta(seconds=ttl_seconds)
+    elif ttl_hours is None:
+        lifetime = timedelta(hours=1)
+    else:
+        lifetime = timedelta(hours=ttl_hours) if ttl_hours else None
 
     payload = TokenPayload(
         token_id="",
@@ -450,7 +470,7 @@ def mint_audience_token(
         subject=subject,
         capabilities=list(scopes),
         issued_at=now,
-        expires_at=now + timedelta(hours=ttl_hours) if ttl_hours else None,
+        expires_at=now + lifetime if lifetime is not None else None,
         metadata=metadata or {},
         audience=audience,
     )
@@ -477,7 +497,8 @@ def mint_agent_audience_token(
     audience: str = "skchat",
     scopes: Optional[list[str]] = None,
     *,
-    ttl_hours: int = 1,
+    ttl_hours: Optional[int] = None,
+    ttl_seconds: Optional[int] = None,
     home: Optional[Path] = None,
     sign: bool = True,
     metadata: Optional[dict] = None,
@@ -503,6 +524,7 @@ def mint_agent_audience_token(
         audience: The subapp id the token is scoped to (default ``"skchat"``).
         scopes: Explicit granted scopes; ``None`` uses the audience default.
         ttl_hours: Hours until expiry (default 1; the shell re-mints).
+        ttl_seconds: Bounded non-persistent lifetime in seconds.
         home: CapAuth home; ``None`` resolves via ``resolve_capauth_home()``.
         sign: Whether to PGP-sign the token.
         metadata: Additional claims to embed.
@@ -539,6 +561,7 @@ def mint_agent_audience_token(
         audience,
         granted,
         ttl_hours=ttl_hours,
+        ttl_seconds=ttl_seconds,
         metadata=metadata,
         sign=sign,
         store=store,

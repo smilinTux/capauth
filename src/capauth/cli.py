@@ -1696,9 +1696,15 @@ def token() -> None:
 )
 @click.option(
     "--ttl-hours",
-    default=1,
+    default=None,
     type=int,
     help="Token lifetime in hours (default: 1).",
+)
+@click.option(
+    "--ttl-seconds",
+    default=None,
+    type=click.IntRange(1, 300),
+    help="Non-persistent signed token lifetime in seconds (1-300).",
 )
 @click.option(
     "--no-sign",
@@ -1719,7 +1725,8 @@ def token_mint_audience(
     agent: Optional[str],
     audience: str,
     scopes: tuple[str, ...],
-    ttl_hours: int,
+    ttl_hours: Optional[int],
+    ttl_seconds: Optional[int],
     no_sign: bool,
     export: bool,
 ) -> None:
@@ -1736,14 +1743,21 @@ def token_mint_audience(
 
     scope_list = list(scopes) if scopes else None
 
+    if ttl_seconds is not None and ttl_hours is not None:
+        raise click.UsageError("--ttl-seconds and --ttl-hours are mutually exclusive")
+    if ttl_seconds is not None and no_sign:
+        raise click.UsageError("--ttl-seconds requires signing")
+
     try:
         tok = mint_agent_audience_token(
             agent=agent,
             audience=audience,
             scopes=scope_list,
             ttl_hours=ttl_hours,
+            ttl_seconds=ttl_seconds,
             home=ctx.obj.get("home"),
             sign=not no_sign,
+            store=ttl_seconds is None,
         )
     except (CapAuthError, ValueError) as exc:
         console.print(f"[bold red]Error:[/] {exc}")

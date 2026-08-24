@@ -41,6 +41,14 @@ All notable changes to `capauth` are documented here. The format is based on
 
 ### Added
 
+- Added the typed SKDashboard control-plane decision authorizer, which decodes
+  one canonical bounded delegated bearer, validates the request boundary before
+  one-use verification, joins current delegated and owner-policy decisions,
+  rechecks owner policy around a one-use opaque currentness receipt without a
+  second replay reservation or signature pass, and returns either one sanitized
+  attributable allow context with owner reason text omitted or a detail-free
+  typed non-allow result (card `a3caf264`).
+
 - Added the SKDashboard control-plane authorization contract with separate
   issuer, PDP, enforcement, and owner-policy identities; a closed read,
   proposal, and mutation capability matrix; exact subject, agent, node,

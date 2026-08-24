@@ -9,7 +9,9 @@ only a sanitized decision that is safe to retain or audit.
 from __future__ import annotations
 
 import hashlib
+import hmac
 import json
+import secrets
 from collections.abc import Callable
 from datetime import datetime, timedelta, timezone
 from enum import Enum
@@ -37,6 +39,7 @@ MAX_TTL_SECONDS = 3600
 MAX_CREDENTIAL_BYTES = 256 * 1024
 MAX_AUTHORIZATION_BYTES = (MAX_DELEGATION_DEPTH + 1) * MAX_CREDENTIAL_BYTES + 4096
 MAX_SIGNATURE_LENGTH = 128 * 1024
+MAX_CURRENTNESS_RECEIPTS = 1024
 METADATA_KEY = "capauth_delegated_capability"
 VERIFIER_POLICY_VERSION = "capauth-delegated-authz/v1"
 
@@ -213,6 +216,48 @@ class AuthorizationDeniedError(PermissionError):
         super().__init__(
             f"authorization denied ({decision.reason.value}); decision_id={decision.decision_id}"
         )
+
+
+class AuthorizationReceiptError(PermissionError):
+    """An opaque currentness receipt was invalid, foreign, altered, or reused."""
+
+    def __init__(self) -> None:
+        super().__init__("authorization currentness receipt is invalid")
+
+
+class AuthorizationReceiptUnavailableError(RuntimeError):
+    """A currentness receipt could not be issued safely."""
+
+    def __init__(self) -> None:
+        super().__init__("authorization currentness receipt is unavailable")
+
+
+class AuthorizationCurrentnessReceipt:
+    """One-use, request-local proof that an allow came from this authorizer."""
+
+    __slots__ = ("__mac", "__nonce")
+
+    def __init__(self, nonce: bytes, mac: bytes) -> None:
+        self.__nonce = bytes(nonce)
+        self.__mac = bytes(mac)
+
+    def _proof(self) -> tuple[bytes, bytes]:
+        return self.__nonce, self.__mac
+
+    def __repr__(self) -> str:
+        return "<redacted authorization currentness receipt>"
+
+    __str__ = __repr__
+
+    def __copy__(self):
+        raise TypeError("authorization currentness receipt cannot be copied")
+
+    def __deepcopy__(self, memo):
+        del memo
+        raise TypeError("authorization currentness receipt cannot be copied")
+
+    def __reduce__(self):
+        raise TypeError("authorization currentness receipt cannot be serialized")
 
 
 class DelegationDeniedError(PermissionError):
@@ -785,6 +830,9 @@ class CapabilityAuthorizer:
         self._audit = audit
         self._signature_verifier = signature_verifier or CapAuthSignatureVerifier()
         self._clock = clock or (lambda: datetime.now(UTC))
+        self._receipt_key = secrets.token_bytes(32)
+        self._receipt_lock = Lock()
+        self._receipt_expiries: dict[bytes, datetime] = {}
 
     def authorize(
         self, presented: PresentedCapability | None, request: AuthorizationRequest
@@ -1084,6 +1132,278 @@ class CapabilityAuthorizer:
                 audit_sequence=2,
             )
         return decision
+
+    def authorize_with_receipt(
+        self,
+        presented: PresentedCapability | None,
+        request: AuthorizationRequest,
+    ) -> tuple[AuthorizationDecision, AuthorizationCurrentnessReceipt]:
+        """Authorize once and mint an opaque proof for one later currentness check."""
+
+        decision = self.authorize(presented, request)
+        if presented is None:
+            raise AuthorizationReceiptUnavailableError
+        try:
+            leaf = parse_presented_token(presented.credentials_for_verification()[-1])
+            expiry = _require_utc(leaf.token.payload.expires_at, "expires_at")
+            now = _require_utc(self._clock(), "authorizer clock")
+            nonce = secrets.token_bytes(32)
+        except Exception:
+            raise AuthorizationReceiptUnavailableError from None
+        try:
+            mac = self._receipt_mac(nonce, request, decision)
+        except AuthorizationReceiptError:
+            raise AuthorizationReceiptUnavailableError from None
+        with self._receipt_lock:
+            self._receipt_expiries = {
+                value: deadline
+                for value, deadline in self._receipt_expiries.items()
+                if deadline > now
+            }
+            if len(self._receipt_expiries) >= MAX_CURRENTNESS_RECEIPTS:
+                raise AuthorizationReceiptUnavailableError
+            while nonce in self._receipt_expiries:
+                try:
+                    nonce = secrets.token_bytes(32)
+                    mac = self._receipt_mac(nonce, request, decision)
+                except Exception:
+                    raise AuthorizationReceiptUnavailableError from None
+            self._receipt_expiries[nonce] = expiry
+        return decision, AuthorizationCurrentnessReceipt(nonce, mac)
+
+    def revalidate_current(
+        self,
+        presented: PresentedCapability,
+        request: AuthorizationRequest,
+        prior: AuthorizationDecision,
+        receipt: AuthorizationCurrentnessReceipt,
+    ) -> AuthorizationDecision:
+        """Recheck current policy after downstream work without consuming replay again."""
+
+        if not isinstance(receipt, AuthorizationCurrentnessReceipt):
+            raise AuthorizationReceiptError
+        try:
+            nonce, actual_mac = receipt._proof()
+            expected_mac = self._receipt_mac(nonce, request, prior)
+            now = _require_utc(self._clock(), "authorizer clock")
+        except Exception:
+            raise AuthorizationReceiptError from None
+        with self._receipt_lock:
+            registered_expiry = self._receipt_expiries.get(nonce)
+            self._receipt_expiries = {
+                value: deadline
+                for value, deadline in self._receipt_expiries.items()
+                if deadline > now
+            }
+            valid = (
+                registered_expiry is not None
+                and registered_expiry > now
+                and hmac.compare_digest(actual_mac, expected_mac)
+            )
+            if valid:
+                del self._receipt_expiries[nonce]
+        if not valid:
+            raise AuthorizationReceiptError
+
+        decision_id = prior.decision_id
+        try:
+            raw_chain = presented.credentials_for_verification()
+            chain = tuple(parse_presented_token(raw) for raw in raw_chain)
+        except Exception:
+            self._deny(
+                request,
+                decision_id,
+                DecisionReason.MALFORMED_CREDENTIAL,
+                audit_sequence=2,
+            )
+        leaf = chain[-1]
+        prior_is_bound = (
+            isinstance(prior, AuthorizationDecision)
+            and prior.allow
+            and prior.reason is DecisionReason.ALLOW
+            and prior.attempt_sequence == 1
+            and prior.correlation_id == request.correlation_id
+            and prior.principal_id == request.principal.principal_id
+            and prior.scope == request.scope
+            and prior.credential_digest == leaf.credential_digest
+            and prior.ancestor_credential_digests
+            == tuple(item.credential_digest for item in chain[:-1])
+            and prior.delegation_depth == leaf.claims.delegation.depth
+            and leaf.claims.principal == request.principal
+            and leaf.claims.scope == request.scope
+            and prior.trusted_issuer_policy_revision is not None
+            and bool(prior.principal_policy_revisions)
+            and prior.revocation_revision is not None
+        )
+        if not prior_is_bound:
+            self._deny(
+                request,
+                decision_id,
+                DecisionReason.CURRENT_STATE_CHANGED,
+                chain,
+                audit_sequence=2,
+            )
+
+        try:
+            time_reason = self._validate_chain_time(chain)
+        except Exception:
+            time_reason = DecisionReason.BACKEND_UNAVAILABLE
+        if time_reason:
+            self._deny(
+                request,
+                decision_id,
+                time_reason,
+                chain,
+                issuer_revision=prior.trusted_issuer_policy_revision,
+                principal_references=prior.principal_policy_revisions,
+                revocation_revision=prior.revocation_revision,
+                audit_sequence=2,
+            )
+
+        try:
+            issuer = self._trusted_issuers.snapshot()
+            if not isinstance(issuer, TrustedIssuerSnapshot):
+                raise TypeError("invalid issuer snapshot")
+        except Exception:
+            self._deny(
+                request,
+                decision_id,
+                DecisionReason.BACKEND_UNAVAILABLE,
+                chain,
+                principal_references=prior.principal_policy_revisions,
+                revocation_revision=prior.revocation_revision,
+                audit_sequence=2,
+            )
+        if issuer.policy_version != VERIFIER_POLICY_VERSION:
+            self._deny(
+                request,
+                decision_id,
+                DecisionReason.POLICY_MISMATCH,
+                chain,
+                issuer_revision=issuer.revision,
+                principal_references=prior.principal_policy_revisions,
+                revocation_revision=prior.revocation_revision,
+                audit_sequence=2,
+            )
+        try:
+            chain_reason = self._validate_chain(chain, issuer)
+        except Exception:
+            chain_reason = DecisionReason.BACKEND_UNAVAILABLE
+        if chain_reason:
+            self._deny(
+                request,
+                decision_id,
+                chain_reason,
+                chain,
+                issuer_revision=issuer.revision,
+                principal_references=prior.principal_policy_revisions,
+                revocation_revision=prior.revocation_revision,
+                audit_sequence=2,
+            )
+
+        principal_reason, principal_refs = self._validate_principals(chain, request)
+        if principal_reason:
+            self._deny(
+                request,
+                decision_id,
+                principal_reason,
+                chain,
+                issuer_revision=issuer.revision,
+                principal_references=principal_refs,
+                revocation_revision=prior.revocation_revision,
+                audit_sequence=2,
+            )
+        digests = tuple(item.credential_digest for item in chain)
+        try:
+            revocation = self._revocations.snapshot(digests)
+            if not isinstance(revocation, RevocationSnapshot):
+                raise TypeError("invalid revocation snapshot")
+        except Exception:
+            self._deny(
+                request,
+                decision_id,
+                DecisionReason.BACKEND_UNAVAILABLE,
+                chain,
+                issuer_revision=issuer.revision,
+                principal_references=principal_refs,
+                revocation_revision=prior.revocation_revision,
+                audit_sequence=2,
+            )
+        if leaf.credential_digest in revocation.revoked_credential_digests:
+            self._deny_with_state(
+                request,
+                decision_id,
+                DecisionReason.REVOKED,
+                chain,
+                issuer,
+                principal_refs,
+                revocation,
+                audit_sequence=2,
+            )
+        if any(
+            item.credential_digest in revocation.revoked_credential_digests for item in chain[:-1]
+        ):
+            self._deny_with_state(
+                request,
+                decision_id,
+                DecisionReason.ANCESTOR_REVOKED,
+                chain,
+                issuer,
+                principal_refs,
+                revocation,
+                audit_sequence=2,
+            )
+        try:
+            final_time_reason = self._validate_chain_time(chain)
+        except Exception:
+            final_time_reason = DecisionReason.BACKEND_UNAVAILABLE
+        if final_time_reason:
+            self._deny_with_state(
+                request,
+                decision_id,
+                final_time_reason,
+                chain,
+                issuer,
+                principal_refs,
+                revocation,
+                audit_sequence=2,
+            )
+        if (
+            issuer.revision != prior.trusted_issuer_policy_revision
+            or principal_refs != prior.principal_policy_revisions
+            or revocation.revision != prior.revocation_revision
+        ):
+            self._deny_with_state(
+                request,
+                decision_id,
+                DecisionReason.CURRENT_STATE_CHANGED,
+                chain,
+                issuer,
+                principal_refs,
+                revocation,
+                audit_sequence=2,
+            )
+        return prior
+
+    def _receipt_mac(
+        self,
+        nonce: bytes,
+        request: AuthorizationRequest,
+        decision: AuthorizationDecision,
+    ) -> bytes:
+        try:
+            facts = {
+                "domain": "capauth-authorization-currentness-receipt/v1",
+                "nonce": nonce.hex(),
+                "request": request.model_dump(mode="json"),
+                "decision": decision.model_dump(mode="json"),
+            }
+            encoded = json.dumps(
+                facts, sort_keys=True, separators=(",", ":"), ensure_ascii=True
+            ).encode("ascii")
+        except Exception:
+            raise AuthorizationReceiptError from None
+        return hmac.new(self._receipt_key, encoded, hashlib.sha256).digest()
 
     def _refresh_current_state(
         self,
@@ -1452,8 +1772,11 @@ class DelegatingCapabilityIssuer:
 
 __all__ = [
     "AuditSink",
+    "AuthorizationCurrentnessReceipt",
     "AuthorizationDecision",
     "AuthorizationDeniedError",
+    "AuthorizationReceiptError",
+    "AuthorizationReceiptUnavailableError",
     "AuthorizationRequest",
     "BackendUnavailableError",
     "CapabilityAuthorizer",

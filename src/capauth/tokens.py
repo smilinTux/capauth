@@ -79,6 +79,8 @@ class TokenSigningError(CapAuthError):
 #:   without an explicit scopes arg. Tighten/expand these to a real
 #:   ``<app>.<verb>`` set once each subapp declares its manifest auth block;
 #:   callers needing more can always pass an explicit ``scopes`` list.
+#: * ``skdashboard`` - the canonical SKDashboard module manifest declares a
+#:   read-only default. Mutation and proposal capabilities require explicit minting.
 AUDIENCE_SCOPES: dict[str, list[str]] = {
     "skchat": ["chat.read", "chat.send", "calls.join", "spaces.join"],
     # Grounded: skcode manifest auth.scopes (skharness.manifest).
@@ -87,6 +89,7 @@ AUDIENCE_SCOPES: dict[str, list[str]] = {
     "skcomms": ["skcomms.read"],
     "skos": ["skos.read"],
     "skmemory": ["skmemory.read"],
+    "skdashboard": ["skdashboard.read"],
 }
 
 

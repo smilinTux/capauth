@@ -211,8 +211,9 @@ class TestServiceEndpoints:
         """Packaged and source asset roots reject path traversal."""
         import asyncio
 
-        import capauth.service.app as svc_app
         from fastapi import HTTPException
+
+        import capauth.service.app as svc_app
 
         source_root = tmp_path / "phone-signer"
         source_root.mkdir()

@@ -275,10 +275,10 @@ def main() -> None:
                     print(f"  Generated fingerprint: {fingerprint}")
                 else:
                     print(
-                        f"  [WARN] Could not generate profile; identity.json will lack fingerprint"
+                        "  [WARN] Could not generate profile; identity.json will lack fingerprint"
                     )
             else:
-                print(f"  [dry-run] Would generate new Ed25519 keypair (--allow-new-keys)")
+                print("  [dry-run] Would generate new Ed25519 keypair (--allow-new-keys)")
                 fingerprint = None
         else:
             print(f"  fingerprint : {fingerprint}")

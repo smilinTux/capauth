@@ -25,10 +25,11 @@ from pathlib import Path
 
 import pytest
 
+from capauth.identity_class import IdentityClassName, assign_identity_class
 from capauth.pairing import EnrollmentMode, approve, enroll_device
+from capauth.tokens import issue_token
 
 from .conftest import enrolled_attested_credentials, enrolled_verified_credentials
-from capauth.tokens import issue_token
 
 SUBJECT = "alice@chef.skworld.io"
 PUBKEY = "-----BEGIN PGP PUBLIC KEY BLOCK-----\nfake\n-----END PGP PUBLIC KEY BLOCK-----"
@@ -62,7 +63,9 @@ def _enroll(base: Path, *, mode: EnrollmentMode, subject: str = SUBJECT):
         subject=subject,
         **extra,
     )
-    return approve(enrollment.enrollment_id, "operator@chef.skworld", base_dir=base)
+    record = approve(enrollment.enrollment_id, "operator@chef.skworld", base_dir=base)
+    assign_identity_class(subject, IdentityClassName.OPERATOR, base_dir=base)
+    return record
 
 
 def _issue(base: Path, capabilities, *, subject: str = SUBJECT, ttl_hours=24):
@@ -137,7 +140,7 @@ class TestAuthzDecideEndpoint:
         assert audits[0]["data"]["decision"] == "deny"
 
     def test_unknown_subject_fails_closed(self) -> None:
-        """An arbitrary (subject, capability) with no enrolled device -> deny."""
+        """An arbitrary unclassified subject is denied before device lookup."""
         resp = self.client.post(
             "/v1/authz/decide",
             json={"subject": "mallory@evil.example", "capability": "skchat.send"},
@@ -146,7 +149,7 @@ class TestAuthzDecideEndpoint:
         assert resp.status_code == 200
         body = resp.json()
         assert body["allow"] is False
-        assert "unknown subject" in body["reason"]
+        assert "has no identity class assignment" in body["reason"]
 
     # --- fail closed on bad input ------------------------------------------
     def test_malformed_body_missing_capability(self) -> None:

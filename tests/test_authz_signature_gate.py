@@ -38,6 +38,7 @@ from pathlib import Path
 import pytest
 
 from capauth.authz import decide
+from capauth.identity_class import IdentityClassName, assign_identity_class
 from capauth.pairing import EnrollmentMode, approve, enroll_device
 from capauth.tokens import TokenSigningError, issue_token, list_tokens, signature_verifies
 
@@ -60,6 +61,8 @@ ABSENT_KEY_FPR = "D8920EA86742260161A220C30355DE4AA63CCD69"
 _gpg_missing = pytest.mark.skipif(
     shutil.which("gpg") is None, reason="gpg binary not available to produce a real signature"
 )
+
+pytestmark = pytest.mark.usefixtures("capability_rule_test_ceiling")
 
 
 # --------------------------------------------------------------------------- #
@@ -88,6 +91,7 @@ def _make_home(tmp_path: Path, issuer_fpr: str, *, mode=EnrollmentMode.VERIFIED)
         proof=proof,
     )
     approve(enrollment.enrollment_id, "operator@chef.skworld.io", base_dir=home)
+    assign_identity_class(SUBJECT, IdentityClassName.OPERATOR, base_dir=home)
     return home
 
 

@@ -155,6 +155,30 @@ def tmp_capauth_home(tmp_path) -> Path:
     return tmp_path / ".capauth"
 
 
+@pytest.fixture
+def capability_rule_test_ceiling(monkeypatch):
+    """Use an explicit test class while isolating lower PDP rule tests.
+
+    These suites test capability-specific enrollment floors, signatures, and
+    revocation. Their synthetic subjects still receive an explicit class, but
+    its test-only tofu floor keeps the production operator floor from replacing
+    the lower-layer result under test. Production ceilings have direct coverage
+    in ``test_identity_class.py``.
+    """
+    import capauth.authz as authz_module
+    from capauth.identity_class import DEFAULT_CLASSES, IdentityClassName
+    from capauth.pairing import EnrollmentMode
+
+    operator = DEFAULT_CLASSES[IdentityClassName.OPERATOR.value].model_copy(
+        update={"minimum_mode": EnrollmentMode.TOFU}
+    )
+    monkeypatch.setattr(
+        authz_module,
+        "DEFAULT_CLASSES",
+        {**DEFAULT_CLASSES, IdentityClassName.OPERATOR.value: operator},
+    )
+
+
 # --- Trust domain fixtures (kernel track M1) -------------------------------
 # The moved trust-web tests build a full skcapstone agent home. These fixtures
 # are ported from skcapstone's conftest so the copied tests run byte-identically.

@@ -11,6 +11,7 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+from capauth.identity_class import IdentityClassName, assign_identity_class
 from capauth.pairing import EnrollmentMode, approve, enroll_device, revoke
 from capauth.service.oidc.clients import ClientRegistry, OIDCClient
 from capauth.service.oidc.provider import (
@@ -106,6 +107,7 @@ def refresh_app(monkeypatch, tmp_path, stub_token_signing):
         subject=policy_subject,
     )
     device = approve(enrollment.enrollment_id, "operator@chef.skworld.io", base_dir=tmp_path)
+    assign_identity_class(policy_subject, IdentityClassName.EDGE_DEVICE, base_dir=tmp_path)
     issue_token(
         home=tmp_path,
         subject=policy_subject,

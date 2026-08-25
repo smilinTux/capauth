@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import Optional
 
 from .crypto import get_backend
+from .identity_class import IdentityClassError, IdentityClassName, assign_identity_class
 from .models import Algorithm
 from .pairing import (
     EnrollmentMode,
@@ -112,6 +113,7 @@ def provision_subject(
     subject: str,
     scopes: Optional[list[str]] = None,
     *,
+    identity_class: "IdentityClassName | str",
     mode: str = "verified",
     pubkey: Optional[str] = None,
     proof: Optional[str] = None,
@@ -122,12 +124,14 @@ def provision_subject(
     sign: bool = True,
     base_dir: Optional[Path] = None,
 ) -> dict:
-    """Provision one subject so the PDP will allow its scopes.
+    """Provision one explicitly classed subject for PDP decisions.
 
     Enrolls a ``DeviceRecord`` at ``mode`` (default verified, the strongest, which
     satisfies every seeded skchat rule) and issues a capability token granting
-    ``scopes`` (default the three skchat capabilities). Both land under the same
-    ``base_dir`` the PDP reads.
+    ``scopes`` (default the three skchat capabilities). It also persists the
+    required capability-ceiling assignment. All three land under the same
+    ``base_dir`` the PDP reads. The class ceiling and enrollment floor can still
+    deny a granted scope.
 
     Args:
         subject: The subject identity the PDP will see (e.g. an fqid).
@@ -135,6 +139,9 @@ def provision_subject(
             a translatable legacy shape is normalized, a non-conforming one is
             refused (:class:`capauth.exceptions.SubjectNamingError`).
         scopes: Capabilities to grant; defaults to the skchat scopes.
+        identity_class: Required capability-ceiling role. It is explicit because
+            fqid spelling alone cannot safely distinguish an operator, agent,
+            service, connector, or node.
         mode: Enrollment mode for the device (verified | attested | tofu).
         pubkey: The subject's real public key, when a specific device key is
             to hand. When omitted (the common operator-provisioning case), a
@@ -166,10 +173,18 @@ def provision_subject(
     Returns:
         A summary dict: subject (the CANONICAL form actually enrolled/granted,
         which may differ from the ``subject`` argument if it was a translatable
-        legacy shape), device_id, token_id, mode, scopes.
+        legacy shape), device_id, token_id, mode, identity_class, scopes.
     """
     granted = list(scopes) if scopes is not None else list(SKCHAT_SCOPES)
     base = Path(base_dir).expanduser() if base_dir is not None else default_base_dir()
+    try:
+        resolved_identity_class = (
+            identity_class
+            if isinstance(identity_class, IdentityClassName)
+            else IdentityClassName(str(identity_class).strip())
+        )
+    except ValueError as exc:
+        raise IdentityClassError(f"unknown identity class {identity_class!r}") from exc
 
     if pubkey is None:
         # No real device key presented: mint one + prove it ourselves rather
@@ -202,6 +217,7 @@ def provision_subject(
     # module-level capauth.subject.canonical_subject imported above)
     canonical_subj = enrollment.subject or subject
     device = approve(enrollment.enrollment_id, approver, base_dir=base)
+    stored_class = assign_identity_class(canonical_subj, resolved_identity_class, base_dir=base)
     token = issue_token(base, canonical_subj, granted, ttl_hours=ttl_hours, sign=sign)
 
     return {
@@ -209,6 +225,7 @@ def provision_subject(
         "device_id": device.device_id,
         "token_id": token.payload.token_id,
         "mode": device.mode.value,
+        "identity_class": stored_class,
         "scopes": granted,
     }
 

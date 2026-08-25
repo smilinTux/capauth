@@ -29,6 +29,7 @@ from capauth.authz import (
     Decision,
     decide,
 )
+from capauth.identity_class import IdentityClassName, assign_identity_class
 from capauth.pairing import EnrollmentMode, approve, enroll_device, revoke
 from capauth.tokens import issue_token
 
@@ -41,7 +42,7 @@ PUBKEY = "-----BEGIN PGP PUBLIC KEY BLOCK-----\nfake\n-----END PGP PUBLIC KEY BL
 # test here issues SIGNED tokens against the hermetic gpg stub (see conftest).
 # The stub still refuses unsigned/tampered tokens; the real OpenPGP path is
 # covered in test_authz_signature_gate.py.
-pytestmark = pytest.mark.usefixtures("stub_token_signing")
+pytestmark = pytest.mark.usefixtures("stub_token_signing", "capability_rule_test_ceiling")
 
 
 # --------------------------------------------------------------------------- #
@@ -74,7 +75,9 @@ def _enroll(base: Path, *, mode: EnrollmentMode, subject: str = SUBJECT, scopes=
         subject=subject,
         **extra,
     )
-    return approve(enrollment.enrollment_id, "operator@chef.skworld", base_dir=base)
+    record = approve(enrollment.enrollment_id, "operator@chef.skworld", base_dir=base)
+    assign_identity_class(subject, IdentityClassName.OPERATOR, base_dir=base)
+    return record
 
 
 def _issue(base: Path, capabilities, *, subject: str = SUBJECT, ttl_hours=24):
@@ -160,13 +163,13 @@ def test_deny_on_insufficient_mode_tofu_when_verified_required(tmp_path):
 
 
 def test_deny_on_unknown_subject(tmp_path):
-    # No device enrolled at all -> fail closed even though a token exists.
+    # No class or device exists. The structural ceiling denies first.
     _issue(tmp_path, ["skchat.send"])
 
     decision = decide(SUBJECT, "skchat.send", base_dir=tmp_path)
 
     assert decision.allow is False
-    assert "unknown subject" in decision.reason
+    assert "has no identity class assignment" in decision.reason
 
 
 def test_deny_on_unknown_capability(tmp_path):

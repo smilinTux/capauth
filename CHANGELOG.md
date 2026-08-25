@@ -6,6 +6,11 @@ All notable changes to `capauth` are documented here. The format is based on
 
 ## [Unreleased]
 
+- Bind passkeys to an explicit named HTTPS WebAuthn RP and a dedicated
+  `CAPAUTH_PASSKEY_DATA_DIR`. Unsafe, implicit, IP-address, or mismatched RP
+  configuration now fails before PGP proof verification, while unrelated OIDC
+  and service state keep their existing storage paths (card `00bb69a3`).
+
 - Prefer the explicit OIDC issuer for root discovery instead of the placeholder service identity.
 
 - Added fail-closed `CAPAUTH_GPG_PASSPHRASE_FILE` support for unattended

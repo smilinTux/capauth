@@ -15,15 +15,18 @@ expire. The RP id / origin derive from the IdP issuer.
 
 from __future__ import annotations
 
+import ipaddress
 import json
 import logging
 import os
+import re
 import secrets
+import stat
 import threading
 import time
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlparse
+from urllib.parse import urlsplit
 
 from webauthn import (
     generate_authentication_options,
@@ -50,28 +53,69 @@ class PasskeyStoreUnavailableError(RuntimeError):
     """Durable passkey state cannot be read or written safely."""
 
 
-def rp_origin_and_id() -> tuple[str, str]:
-    """Return ``(origin, rp_id)`` derived from the IdP issuer.
+class PasskeyRPUnavailableError(RuntimeError):
+    """The WebAuthn relying-party configuration is unavailable or unsafe."""
 
-    origin = ``https://host[:port]`` (what the browser reports); rp_id = the
-    bare host (no scheme/port), as WebAuthn requires.
+
+def _named_host(value: str) -> str:
+    host = value.strip().lower().rstrip(".")
+    try:
+        ipaddress.ip_address(host)
+    except ValueError:
+        pass
+    else:
+        raise PasskeyRPUnavailableError("passkey RP must be a DNS name")
+    if (
+        len(host) > 253
+        or "." not in host
+        or any(
+            not re.fullmatch(r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?", label)
+            for label in host.split(".")
+        )
+    ):
+        raise PasskeyRPUnavailableError("passkey RP must be a DNS name")
+    return host
+
+
+def rp_origin_and_id() -> tuple[str, str]:
+    """Return the exact HTTPS origin and configured named RP ID.
+
+    The RP ID must equal the issuer host or be its DNS suffix, as WebAuthn
+    requires. IP literals and implicit RP IDs fail closed.
     """
-    iss = (
-        os.environ.get("CAPAUTH_OIDC_ISSUER")
-        or os.environ.get("CAPAUTH_BASE_URL")
-        or f"https://{os.environ.get('CAPAUTH_SERVICE_ID', 'capauth.local')}"
-    ).rstrip("/")
-    netloc = urlparse(iss).netloc or iss.split("//")[-1]
-    rp_id = netloc.split(":")[0]
-    return iss, rp_id
+    issuer = (os.environ.get("CAPAUTH_OIDC_ISSUER") or "").strip().rstrip("/")
+    configured_rp_id = (os.environ.get("CAPAUTH_WEBAUTHN_RP_ID") or "").strip()
+    try:
+        parsed = urlsplit(issuer)
+        port = parsed.port
+    except ValueError as exc:
+        raise PasskeyRPUnavailableError("invalid passkey issuer") from exc
+    if (
+        parsed.scheme != "https"
+        or not parsed.hostname
+        or parsed.username is not None
+        or parsed.password is not None
+        or parsed.query
+        or parsed.fragment
+    ):
+        raise PasskeyRPUnavailableError("passkey issuer must be named HTTPS")
+    host = _named_host(parsed.hostname)
+    rp_id = _named_host(configured_rp_id)
+    if host != rp_id and not host.endswith(f".{rp_id}"):
+        raise PasskeyRPUnavailableError("passkey RP ID does not match issuer")
+    origin = f"https://{host}{f':{port}' if port is not None else ''}"
+    return origin, rp_id
 
 
 class PasskeyStore:
     """Persisted passkey credentials + in-memory ceremony challenges."""
 
-    def __init__(self, data_dir: str = "/data") -> None:
-        self._dir = Path(data_dir)
-        self._path = self._dir / "passkeys.json"
+    def __init__(self, data_dir: str | None = None) -> None:
+        configured = Path(data_dir).expanduser() if data_dir else None
+        if configured is not None and not configured.is_absolute():
+            configured = None
+        self._dir = configured
+        self._path = configured / "passkeys.json" if configured is not None else None
         self._lock = threading.Lock()
         # cred_id(b64url) -> {fingerprint, public_key(b64url), sign_count}
         self._creds: dict[str, dict] = self._load()
@@ -80,7 +124,33 @@ class PasskeyStore:
 
     # -- persistence ------------------------------------------------------
 
+    def _storage_preflight(self) -> None:
+        if self._dir is None or self._path is None:
+            raise PasskeyStoreUnavailableError("passkey data directory is not configured")
+        if self._dir.exists():
+            if (
+                self._dir.is_symlink()
+                or not self._dir.is_dir()
+                or stat.S_IMODE(self._dir.stat().st_mode) & 0o077
+            ):
+                raise PasskeyStoreUnavailableError("passkey data directory is unavailable")
+        if self._path.exists() and (
+            self._path.is_symlink()
+            or not self._path.is_file()
+            or stat.S_IMODE(self._path.stat().st_mode) != 0o600
+        ):
+            raise PasskeyStoreUnavailableError("passkey state is unavailable")
+
+    def preflight(self) -> tuple[str, str]:
+        """Validate isolated storage and WebAuthn configuration without mutation."""
+        relying_party = rp_origin_and_id()
+        self._storage_preflight()
+        return relying_party
+
     def _load(self) -> dict[str, dict]:
+        if self._path is None:
+            return {}
+        self._storage_preflight()
         if not self._path.exists():
             return {}
         try:
@@ -92,9 +162,12 @@ class PasskeyStore:
         return data
 
     def _save(self) -> None:
+        if self._dir is None or self._path is None:
+            raise PasskeyStoreUnavailableError("passkey data directory is not configured")
         tmp = self._path.with_name(f".{self._path.name}.tmp-{os.getpid()}-{secrets.token_hex(4)}")
         try:
             self._dir.mkdir(mode=0o700, parents=True, exist_ok=True)
+            self._storage_preflight()
             fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
             try:
                 payload = json.dumps(self._creds, sort_keys=True).encode("utf-8")
@@ -126,7 +199,7 @@ class PasskeyStore:
         ``complete_registration`` to this fingerprint + challenge.
         """
         fp = fingerprint.upper()
-        _origin, rp_id = rp_origin_and_id()
+        _origin, rp_id = self.preflight()
         exclude = [
             PublicKeyCredentialDescriptor(id=base64url_to_bytes(cid))
             for cid in self.credentials_for(fp)
@@ -156,7 +229,7 @@ class PasskeyStore:
         rec = self._reg.pop(ticket, None)
         if rec is None or rec["exp"] < time.time():
             raise ValueError("expired or unknown registration ticket")
-        origin, rp_id = rp_origin_and_id()
+        origin, rp_id = self.preflight()
         verification = verify_registration_response(
             credential=credential if isinstance(credential, str) else json.dumps(credential),
             expected_challenge=base64url_to_bytes(rec["challenge"]),
@@ -192,7 +265,7 @@ class PasskeyStore:
         ``fingerprint_hint`` narrows ``allowCredentials``; omit it for a
         discoverable (resident-key) login where the authenticator picks.
         """
-        _origin, rp_id = rp_origin_and_id()
+        _origin, rp_id = self.preflight()
         allow = (
             [
                 PublicKeyCredentialDescriptor(id=base64url_to_bytes(cid))
@@ -222,7 +295,7 @@ class PasskeyStore:
         stored = self._creds.get(cid)
         if not stored:
             raise ValueError("unknown credential")
-        origin, rp_id = rp_origin_and_id()
+        origin, rp_id = self.preflight()
         verification = verify_authentication_response(
             credential=credential if isinstance(credential, str) else json.dumps(credential),
             expected_challenge=base64url_to_bytes(rec["challenge"]),

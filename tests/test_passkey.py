@@ -18,6 +18,7 @@ soft = pytest.importorskip("soft_webauthn")
 from soft_webauthn import SoftWebauthnDevice  # noqa: E402
 
 from capauth.service.oidc.passkey import (  # noqa: E402
+    PasskeyRPUnavailableError,
     PasskeyStore,
     PasskeyStoreUnavailableError,
     rp_origin_and_id,
@@ -86,12 +87,53 @@ def _assert_json(asr: dict) -> dict:
 @pytest.fixture
 def env(monkeypatch):
     monkeypatch.setenv("CAPAUTH_OIDC_ISSUER", "https://example.test")
+    monkeypatch.setenv("CAPAUTH_WEBAUTHN_RP_ID", "example.test")
 
 
 def test_origin_and_rpid(env):
     origin, rpid = rp_origin_and_id()
     assert origin == "https://example.test"
     assert rpid == "example.test"
+
+
+def test_named_subdomain_origin_and_parent_rpid(monkeypatch):
+    monkeypatch.setenv("CAPAUTH_OIDC_ISSUER", "https://login.example.test:8443/oidc")
+    monkeypatch.setenv("CAPAUTH_WEBAUTHN_RP_ID", "example.test")
+
+    assert rp_origin_and_id() == ("https://login.example.test:8443", "example.test")
+
+
+@pytest.mark.parametrize(
+    ("issuer", "rp_id"),
+    [
+        ("https://100.81.238.58:8420", "100.81.238.58"),
+        ("http://capauth.example.test", "capauth.example.test"),
+        ("https://capauth.example.test", "other.example.test"),
+        ("https://capauth.example.test", ""),
+    ],
+)
+def test_unsafe_or_implicit_rp_configuration_fails_closed(monkeypatch, issuer, rp_id):
+    monkeypatch.setenv("CAPAUTH_OIDC_ISSUER", issuer)
+    if rp_id:
+        monkeypatch.setenv("CAPAUTH_WEBAUTHN_RP_ID", rp_id)
+    else:
+        monkeypatch.delenv("CAPAUTH_WEBAUTHN_RP_ID", raising=False)
+
+    with pytest.raises(PasskeyRPUnavailableError):
+        rp_origin_and_id()
+
+
+@pytest.mark.parametrize("data_dir", [None, "relative/passkeys"])
+def test_passkey_store_requires_explicit_absolute_directory(env, data_dir):
+    with pytest.raises(PasskeyStoreUnavailableError):
+        PasskeyStore(data_dir=data_dir).preflight()
+
+
+def test_passkey_store_rejects_broad_directory_permissions(env, tmp_path):
+    tmp_path.chmod(0o755)
+
+    with pytest.raises(PasskeyStoreUnavailableError):
+        PasskeyStore(data_dir=str(tmp_path)).preflight()
 
 
 def test_full_register_then_authenticate(env, tmp_path):
@@ -116,6 +158,17 @@ def test_full_register_then_authenticate(env, tmp_path):
     asr = device.get(_get_input(req_options), origin)
     got = store.complete_authentication("req-1", _assert_json(asr))
     assert got == FP
+
+    # A fresh process can load the credential and authenticate again.
+    restarted_store = PasskeyStore(data_dir=str(tmp_path))
+    restarted_options = restarted_store.begin_authentication("req-after-restart", FP)
+    restarted_assertion = device.get(_get_input(restarted_options), origin)
+    assert (
+        restarted_store.complete_authentication(
+            "req-after-restart", _assert_json(restarted_assertion)
+        )
+        == FP
+    )
 
 
 def test_authenticate_discoverable_no_hint(env, tmp_path):

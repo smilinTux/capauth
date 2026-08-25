@@ -297,11 +297,31 @@ root of trust; the passkey is easy-mode.
   authorization code/identity (`sub` = fingerprint) with **`amr=["webauthn"]`**
   (vs `["pgp"]`) so relying parties can tell the tier. A "🔑 Sign in with a
   passkey" button sits on `/oidc/authorize`; browser helpers at `/oidc/passkey.js`.
-- **Store:** `oidc/passkey.py` `PasskeyStore` — persisted credentials (keyed by
-  credential id → fingerprint + public key + sign count), in-memory ceremony
-  challenges. Set `CAPAUTH_DATA_DIR` to an explicit durable directory writable
-  only by the CapAuth service identity. Registration and authentication fail
-  closed if this state cannot be read or atomically persisted. RP id/origin
-  derive from the issuer. Dep: `webauthn` (capauth[service]).
+- **Store:** `oidc/passkey.py` `PasskeyStore` persists credentials keyed by
+  credential ID, fingerprint, public key, and sign count. Ceremony challenges
+  remain in memory. Set `CAPAUTH_PASSKEY_DATA_DIR` to a dedicated absolute
+  mode-0700 directory writable only by the CapAuth service identity. The state
+  file is mode 0600. This setting is read only by the passkey store and cannot
+  redirect OIDC, VAPID, nonce, token, or other CapAuth state. Registration and
+  authentication fail closed if passkey state cannot be read or atomically
+  persisted. Dep: `webauthn` (capauth[service]).
+- **RP configuration:** set `CAPAUTH_OIDC_ISSUER` to the exact named HTTPS
+  issuer and `CAPAUTH_WEBAUTHN_RP_ID` to its DNS host or an explicitly chosen
+  parent DNS suffix. IP literals, HTTP, implicit RP IDs, and mismatched domains
+  return `passkey_rp_unavailable` before PGP proof verification. The WebAuthn
+  expected origin is the issuer scheme, host, and optional port, without its
+  URL path.
 - **Verified:** full register→login ceremony in Python (soft-webauthn) AND live
   in a browser with a virtual authenticator → a passkey login minted an OIDC code.
+
+Before live qualification, the RP DNS name must resolve to the intended CapAuth
+service, and the served certificate must be current, trusted by the browser,
+and contain that exact name in its subject alternative names. Confirm the
+certificate chain and origin before creating any PGP proof. Source completion
+does not authorize DNS, certificate, installation, configuration, restart, or
+live enrollment changes.
+
+Rollback is to revert the source change and remove only the two passkey-specific
+settings. Removing either setting disables passkey enrollment and login with an
+honest unavailable result. It does not move or delete passkey credentials and
+does not change unrelated service state.

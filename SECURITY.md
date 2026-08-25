@@ -90,6 +90,47 @@ concatenate-then-KDF, **never XOR, never pure-PQ**.
 
 ---
 
+## Capability-ceiling migration
+
+The capability-ceiling registry is separate from the fqid grammar. The grammar
+still has exactly five entity classes. A service fqid may receive either the
+`service` ceiling or the narrower-purpose `connector` ceiling. A generic service
+can never dispatch an email, filing, calendar action, or service action. A
+connector can hold an explicit grant for those effects, but it still cannot hold
+the wildcard, issue tokens, or sign identities.
+
+Unclassified subjects fail closed before CapAuth reads a capability token. The
+following temporary compatibility assignment is the complete inventory verified
+on 2026-08-25 in the local shared CapAuth store:
+
+| Existing subject | Temporary ceiling | Removal instant | Migration tool |
+|---|---|---|---|
+| `device:ad80d077a047babf29eec97af454fdbc3b1c37d9` | `edge-device` | `2026-09-01T00:00:00Z` | `capauth.identity_class.assign_identity_class()` |
+
+Before the removal instant, the operator must persist that same assignment in
+each deployment-specific CapAuth data directory:
+
+```python
+from pathlib import Path
+
+from capauth.identity_class import IdentityClassName, assign_identity_class
+
+assign_identity_class(
+    "device:ad80d077a047babf29eec97af454fdbc3b1c37d9",
+    IdentityClassName.EDGE_DEVICE,
+    base_dir=Path("/absolute/path/to/the/active/capauth/data"),
+)
+```
+
+This code change does not run that mutation. Inventory each deployment data
+directory before installation. Classify every verified live subject explicitly,
+then confirm that no subject remains outside the ceiling registry. New records
+must receive an explicit ceiling immediately. The compatibility entry accepts no
+other subject, performs no inferred rewrite, and stops resolving at the recorded
+instant. After that instant, an unclassified subject is denied.
+
+---
+
 ## Supported versions
 
 | Version | Supported |

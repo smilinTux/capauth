@@ -33,6 +33,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from capauth.authz import LEGACY_UNSIGNED_GRACE_ENV, decide
+from capauth.identity_class import IdentityClassName, assign_identity_class
 from capauth.pairing import EnrollmentMode, approve, enroll_device
 from capauth.subject import canonical_subject
 from capauth.tokens import issue_token
@@ -61,6 +62,7 @@ def _enroll(base: Path, *, mode: EnrollmentMode = EnrollmentMode.VERIFIED) -> No
         pubkey, [CAPABILITY], mode=mode, base_dir=base, subject=SUBJECT, proof=proof
     )
     approve(enrollment.enrollment_id, "operator@chef.skworld", base_dir=base)
+    assign_identity_class(_CANONICAL_SUBJECT, IdentityClassName.OPERATOR, base_dir=base)
 
 
 def _future_deadline(**kwargs) -> str:

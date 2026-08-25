@@ -6,6 +6,13 @@ All notable changes to `capauth` are documented here. The format is based on
 
 ## [Unreleased]
 
+- Fail closed when a subject has no capability-ceiling assignment. Add explicit
+  `service` and `connector` ceiling roles over the existing five-class fqid
+  grammar, with external dispatch structurally forbidden to generic services.
+  One enumerated device-seat compatibility assignment expires on 2026-09-01
+  unless persisted first. Operator provisioning now requires and persists an
+  explicit ceiling assignment (card `c1d836a5`).
+
 - Add a secret-free `.tar.gpg` quarantine verification path with optional
   passphrase-file decryption and exact declared member matching (card
   `cc3a970a`).

@@ -18,7 +18,8 @@ Covered:
 * the class allowlist denies a capability nothing explicitly forbids;
 * a node is still allowed the inference and read capabilities it exists for;
 * the AUDIT obligation survives on BOTH the allow and the deny path;
-* an UNCLASSIFIED subject decides exactly as it did before this layer existed;
+* an UNCLASSIFIED subject denies with the malformed-assignment failure class;
+* the one dated migration subject resolves to a real class only until removal;
 * the class enrollment floor stacks on top of the capability's own floor;
 * an unusable assignment (corrupt file, unknown class name) fails closed.
 """
@@ -26,14 +27,19 @@ Covered:
 from __future__ import annotations
 
 import json
+from datetime import datetime, timezone
 from pathlib import Path
 
 import pytest
 
+import capauth.identity_class as identity_class_module
 from capauth.authz import OBLIGATION_AUDIT, Decision, decide
 from capauth.identity_class import (
     DEFAULT_CLASSES,
+    EXTERNAL_EFFECT_CAPABILITIES,
     IDENTITY_CLASS_RELPATH,
+    UNCLASSIFIED_MIGRATION_ASSIGNMENTS,
+    UNCLASSIFIED_MIGRATION_REMOVAL_AT,
     IdentityClass,
     IdentityClassError,
     IdentityClassName,
@@ -123,6 +129,65 @@ def test_node_class_forbids_the_three_operator_capabilities():
     assert node.forbids(Capability.ALL.value)
     assert node.forbids(Capability.TOKEN_ISSUE.value)
     assert node.forbids(Capability.IDENTITY_SIGN.value)
+
+
+def test_ceiling_registry_covers_every_enrolled_subject_kind():
+    """Five fqid kinds map to six ceilings because services split by effect."""
+    expected_ceilings = {
+        "operator",
+        "agent",
+        "service",
+        "connector",
+        "node",
+        "edge-device",
+    }
+    grammar_kind_ceilings = {
+        "human": {"operator"},
+        "agent": {"agent"},
+        "service": {"service", "connector"},
+        "node": {"node"},
+        "device-seat": {"edge-device"},
+    }
+
+    assert set(grammar_kind_ceilings) == {
+        "human",
+        "agent",
+        "service",
+        "node",
+        "device-seat",
+    }
+    assert {member.value for member in IdentityClassName} == expected_ceilings
+    assert set(DEFAULT_CLASSES) == expected_ceilings
+    assert set().union(*grammar_kind_ceilings.values()) == expected_ceilings
+
+
+def test_service_and_connector_split_external_effect_capabilities():
+    service = DEFAULT_CLASSES[IdentityClassName.SERVICE.value]
+    connector = DEFAULT_CLASSES[IdentityClassName.CONNECTOR.value]
+
+    assert service.minimum_mode is EnrollmentMode.VERIFIED
+    assert connector.minimum_mode is EnrollmentMode.VERIFIED
+    for capability in EXTERNAL_EFFECT_CAPABILITIES:
+        assert service.forbids(capability)
+        assert connector.permits(capability)
+        assert not connector.forbids(capability)
+    for capability in (
+        Capability.ALL.value,
+        Capability.TOKEN_ISSUE.value,
+        Capability.IDENTITY_SIGN.value,
+    ):
+        assert service.forbids(capability)
+        assert connector.forbids(capability)
+
+
+def test_migration_entry_is_enumerated_dated_and_edge_classed():
+    assert UNCLASSIFIED_MIGRATION_REMOVAL_AT == datetime(2026, 9, 1, tzinfo=timezone.utc)
+    assert UNCLASSIFIED_MIGRATION_ASSIGNMENTS == {
+        "device:ad80d077a047babf29eec97af454fdbc3b1c37d9": "edge-device"
+    }
+    edge = DEFAULT_CLASSES[IdentityClassName.EDGE_DEVICE.value]
+    assert edge.permits("skdashboard.read")
+    assert edge.permits("skdashboard.events.read")
 
 
 def test_node_allowlist_is_inference_and_reads_only():
@@ -270,52 +335,65 @@ def test_audit_obligation_present_on_the_class_allow_path(tmp_path):
 
 
 # --------------------------------------------------------------------------- #
-# back-compat: an unclassified subject is untouched
+# unclassified subjects fail closed
 # --------------------------------------------------------------------------- #
-def _unclassified_outcomes(base: Path) -> list[tuple[bool, str]]:
-    """Run a representative decision matrix for an UNCLASSIFIED subject."""
-    _enroll(base, mode=EnrollmentMode.VERIFIED, subject=OTHER_SUBJECT)
-    _issue(base, ["skchat.send", "skchat.inbox"], subject=OTHER_SUBJECT)
-    return [
-        (d.allow, d.reason)
-        for d in (
-            decide(OTHER_SUBJECT, "skchat.send", base_dir=base),
-            decide(OTHER_SUBJECT, "skchat.inbox", base_dir=base),
-            decide(OTHER_SUBJECT, "skchat.prekey", base_dir=base),
-            decide(OTHER_SUBJECT, "change.deploy", base_dir=base),
-            decide(OTHER_SUBJECT, Capability.TOKEN_ISSUE.value, base_dir=base),
-            decide("nobody@chef.skworld.io", "skchat.send", base_dir=base),
-        )
-    ]
+def test_unclassified_identity_sign_denies_like_malformed_assignment(tmp_path):
+    _enroll(tmp_path, mode=EnrollmentMode.VERIFIED, subject=OTHER_SUBJECT)
+    _issue(tmp_path, [Capability.ALL.value], subject=OTHER_SUBJECT)
+
+    unclassified = decide(OTHER_SUBJECT, Capability.IDENTITY_SIGN.value, base_dir=tmp_path)
+
+    path = tmp_path / IDENTITY_CLASS_RELPATH
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps({OTHER_SUBJECT: "overlord"}), encoding="utf-8")
+    malformed = decide(OTHER_SUBJECT, Capability.IDENTITY_SIGN.value, base_dir=tmp_path)
+
+    failure_class = "identity class assignment is unusable:"
+    assert unclassified.allow is False
+    assert unclassified.reason == (
+        f"{failure_class} subject {OTHER_SUBJECT!r} has no identity class assignment"
+    )
+    assert malformed.allow is False
+    assert malformed.reason.startswith(failure_class)
+    assert _audit_entries(unclassified)
 
 
-def test_unclassified_subject_outcomes_are_unchanged(tmp_path):
-    # Baseline: no assignments file exists at all, the state of the whole fleet
-    # today. Then the same matrix in a store where the class layer is in USE
-    # (another subject is classified) must produce byte-identical outcomes.
-    baseline_dir = tmp_path / "baseline"
-    classified_dir = tmp_path / "classified"
-    baseline_dir.mkdir()
-    classified_dir.mkdir()
-
-    baseline = _unclassified_outcomes(baseline_dir)
-
-    _enroll(classified_dir, mode=EnrollmentMode.VERIFIED)
-    assign_identity_class(NODE_SUBJECT, IdentityClassName.NODE, base_dir=classified_dir)
-    with_classes = _unclassified_outcomes(classified_dir)
-
-    assert not (baseline_dir / IDENTITY_CLASS_RELPATH).exists()
-    assert (classified_dir / IDENTITY_CLASS_RELPATH).exists()
-    assert with_classes == baseline
-    # And the matrix is worth something: it contains real allows and real denies.
-    assert [allow for allow, _ in baseline].count(True) == 2
-
-
-def test_resolve_returns_none_for_an_unclassified_subject(tmp_path):
+def test_resolve_raises_for_an_unclassified_subject(tmp_path):
     assign_identity_class(NODE_SUBJECT, IdentityClassName.NODE, base_dir=tmp_path)
 
-    assert resolve_identity_class(OTHER_SUBJECT, base_dir=tmp_path) is None
+    with pytest.raises(IdentityClassError, match="has no identity class assignment"):
+        resolve_identity_class(OTHER_SUBJECT, base_dir=tmp_path)
     assert resolve_identity_class(NODE_SUBJECT, base_dir=tmp_path) is not None
+
+
+def test_dated_migration_resolves_then_expires(monkeypatch, tmp_path):
+    subject = next(iter(UNCLASSIFIED_MIGRATION_ASSIGNMENTS))
+    monkeypatch.setattr(
+        identity_class_module,
+        "UNCLASSIFIED_MIGRATION_REMOVAL_AT",
+        datetime(2099, 1, 1, tzinfo=timezone.utc),
+    )
+    assert resolve_identity_class(subject, base_dir=tmp_path).name is IdentityClassName.EDGE_DEVICE
+
+    monkeypatch.setattr(
+        identity_class_module,
+        "UNCLASSIFIED_MIGRATION_REMOVAL_AT",
+        datetime(2000, 1, 1, tzinfo=timezone.utc),
+    )
+    with pytest.raises(IdentityClassError, match="has no identity class assignment"):
+        resolve_identity_class(subject, base_dir=tmp_path)
+
+
+def test_persisted_migration_assignment_survives_removal(monkeypatch, tmp_path):
+    subject = next(iter(UNCLASSIFIED_MIGRATION_ASSIGNMENTS))
+    assign_identity_class(subject, IdentityClassName.EDGE_DEVICE, base_dir=tmp_path)
+    monkeypatch.setattr(
+        identity_class_module,
+        "UNCLASSIFIED_MIGRATION_REMOVAL_AT",
+        datetime(2000, 1, 1, tzinfo=timezone.utc),
+    )
+
+    assert resolve_identity_class(subject, base_dir=tmp_path).name is IdentityClassName.EDGE_DEVICE
 
 
 # --------------------------------------------------------------------------- #

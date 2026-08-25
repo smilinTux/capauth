@@ -49,11 +49,13 @@ subject plus the request:
    that flag, because it may be tampered rather than merely legacy. See
    :func:`_legacy_unsigned_grace_deadline`.
 4. The **requested capability** and **resource**.
-5. **The subject's identity class**, from :mod:`capauth.identity_class`
-   (``operator`` / ``agent`` / ``node`` / ``edge-device``). Facts 1-3 all answer
-   "does this subject hold the grant today?". This one answers "is this subject
-   the KIND of thing that may hold it at all?", and it is a CEILING rather than
-   a grant: a ``node`` may never exercise ``Capability.ALL``,
+5. **The subject's capability-ceiling class**, from
+   :mod:`capauth.identity_class` (``operator`` / ``agent`` / ``service`` /
+   ``connector`` / ``node`` / ``edge-device``). This registry is separate from
+   the five-class fqid grammar. Facts 1-3 all answer "does this subject hold the
+   grant today?". This one answers "is this subject the KIND of thing that may
+   hold it at all?", and it is a CEILING rather than a grant: a ``node`` may
+   never exercise ``Capability.ALL``,
    ``Capability.TOKEN_ISSUE`` or ``Capability.IDENTITY_SIGN``, whatever token
    turns up under its subject in the replicated store.
 
@@ -63,10 +65,10 @@ subject plus the request:
    ``Capability.ALL`` token is still denied ``token:issue``, because the request
    is refused before the token store is consulted.
 
-   The class layer is opt-in per subject. A subject with no stored class
-   assignment resolves to ``None`` and the decision path is EXACTLY what it was
-   before this fact existed. An assignment that cannot be resolved (unreadable
-   store, unknown class name) denies, like every other uncertainty here.
+   Every subject must resolve to one class. A missing, unreadable, or unknown
+   assignment denies before the token store is read. One dated and enumerated
+   compatibility assignment resolves a verified live device seat to a real
+   ceiling until its recorded removal instant.
 
 This kernel does NOT decide whether an issuer is *authorized* to grant a given
 capability. A token is pinned to the issuer it declares, but any key in the
@@ -740,8 +742,10 @@ def decide(
     applied before all of that: a ``node``-class subject is denied
     ``token:issue`` even holding a valid, signed ``Capability.ALL`` token, with
     the stable reason ``"identity class 'node' forbids capability 'token:issue'"``.
-    A subject with no class assignment is unaffected and decides exactly as it
-    did before the class layer existed.
+    A subject with no class assignment is denied with the same stable failure
+    class as a malformed assignment. A dated, enumerated migration entry may
+    temporarily resolve a verified live subject to a real ceiling class, never
+    to an unbounded skip.
 
     Args:
         subject: The already-authenticated subject identity (e.g. an fqid).
@@ -771,9 +775,8 @@ def decide(
     # grant; this one asks whether the subject is the kind of identity that may
     # hold it at all. Running it after the token read would make it a grant
     # check like the others, and a stray Capability.ALL token in the replicated
-    # store would lift it. Subjects with no assignment resolve to None and skip
-    # this branch entirely, so their outcomes are byte-for-byte what they were
-    # before this layer existed.
+    # store would lift it. Missing, malformed, and unknown assignments all raise
+    # and take the same fail-closed denial path.
     try:
         identity_class = resolve_identity_class(subject, base_dir=home, classes=class_table)
     except IdentityClassError as exc:
@@ -787,10 +790,9 @@ def decide(
             context,
         )
 
-    if identity_class is not None:
-        ceiling_denial = _class_ceiling_denial(identity_class, capability)
-        if ceiling_denial is not None:
-            return _deny(subject, capability, resource, ceiling_denial, context)
+    ceiling_denial = _class_ceiling_denial(identity_class, capability)
+    if ceiling_denial is not None:
+        return _deny(subject, capability, resource, ceiling_denial, context)
 
     # 1. Unknown capability -> fail closed.
     rule = rule_table.get(capability)
@@ -818,7 +820,7 @@ def decide(
     # 3a. The identity class's own enrollment floor -> fail closed. Checked
     # alongside (not instead of) the capability's floor below: a class may raise
     # the floor for everything a subject of that class does, never lower it.
-    if identity_class is not None and not mode_satisfies(mode, identity_class.minimum_mode):
+    if not mode_satisfies(mode, identity_class.minimum_mode):
         return _deny(
             subject,
             capability,

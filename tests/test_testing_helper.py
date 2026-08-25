@@ -46,6 +46,7 @@ import pytest
 
 import capauth
 from capauth.authz import LEGACY_UNSIGNED_GRACE_ENV, decide
+from capauth.identity_class import IdentityClassName, assign_identity_class
 from capauth.pairing import EnrollmentMode, approve, enroll_device
 from capauth.testing import (
     STUB_ISSUER_FPR,
@@ -76,6 +77,8 @@ RCE_CAPABILITY = "skcode.dispatch"
 
 #: A fingerprint that is not the one the stub signs as.
 OTHER_ISSUER_FPR = "0123456789ABCDEF0123456789ABCDEF01234567"
+
+pytestmark = pytest.mark.usefixtures("capability_rule_test_ceiling")
 
 
 # --------------------------------------------------------------------------- #
@@ -115,6 +118,7 @@ def _make_home(tmp_path: Path, *, mode: EnrollmentMode = EnrollmentMode.VERIFIED
         proof=proof,
     )
     approve(enrollment.enrollment_id, "operator@chef.skworld.io", base_dir=home)
+    assign_identity_class(SUBJECT, IdentityClassName.OPERATOR, base_dir=home)
     return home
 
 
@@ -321,8 +325,7 @@ def test_tofu_enrollment_is_still_below_the_rce_floor(tmp_path, stub_token_signi
 # Those in-child assertions are the actual isolation proof. "It is a subprocess"
 # is an argument; "the child looked and the seams were real" is evidence.
 
-_UNPATCHED_RAISE_PROBE = textwrap.dedent(
-    """
+_UNPATCHED_RAISE_PROBE = textwrap.dedent("""
     import json, pathlib, sys, tempfile
 
     # (a) prove isolation BEFORE proving anything else.
@@ -368,8 +371,7 @@ _UNPATCHED_RAISE_PROBE = textwrap.dedent(
     assert list_tokens(home) == []
 
     print("UNPATCHED-RAISE-OK")
-    """
-)
+    """)
 
 
 def _run_probe(source: str) -> subprocess.CompletedProcess:
@@ -440,8 +442,7 @@ def test_the_unpatched_probe_can_actually_fail():
 def test_importing_capauth_does_not_import_the_seam():
     """``import capauth`` must not pull the seam in, in a fresh interpreter."""
     result = _run_probe(
-        textwrap.dedent(
-            """
+        textwrap.dedent("""
             import sys
             import capauth
             import capauth.authz, capauth.tokens, capauth.pairing, capauth.manifest
@@ -449,8 +450,7 @@ def test_importing_capauth_does_not_import_the_seam():
                 m for m in sys.modules if m.startswith("capauth")
             )
             print("NO-SEAM-IMPORT-OK")
-            """
-        )
+            """)
     )
 
     assert result.returncode == 0, result.stderr
@@ -460,8 +460,7 @@ def test_importing_capauth_does_not_import_the_seam():
 def test_importing_the_seam_patches_nothing():
     """Merely importing ``capauth.testing`` must leave every seam untouched."""
     result = _run_probe(
-        textwrap.dedent(
-            """
+        textwrap.dedent("""
             from capauth import tokens
             before = {
                 name: getattr(tokens, name)
@@ -471,8 +470,7 @@ def test_importing_the_seam_patches_nothing():
             after = {name: getattr(tokens, name) for name in before}
             assert before == after, "importing capauth.testing replaced a seam"
             print("IMPORT-IS-INERT-OK")
-            """
-        )
+            """)
     )
 
     assert result.returncode == 0, result.stderr

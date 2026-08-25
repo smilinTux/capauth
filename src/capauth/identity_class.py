@@ -51,12 +51,14 @@ root the pairing devices and capability tokens use
 is deliberately NOT taken from request context: a class the caller can assert is
 a class an attacker can assert, and the ceiling would then be theirs to raise.
 
-Unclassified subjects are the default
--------------------------------------
-:func:`resolve_identity_class` returns ``None`` for any subject with no
-assignment, and the PDP then behaves EXACTLY as it did before this module
-existed. This layer is opt-in per subject: the fleet's existing identities keep
-their current outcomes until an operator classifies them.
+Unclassified subjects fail closed
+---------------------------------
+:func:`resolve_identity_class` raises :class:`IdentityClassError` for a subject
+with no assignment, and the PDP denies it before reading any capability token.
+One dated, enumerated migration entry temporarily resolves the verified live
+device seat to ``edge-device`` through 2026-09-01. New unclassified subjects
+deny immediately, and the migration entry also denies after its removal date
+unless the operator persisted the assignment first.
 
 Fail closed on a broken assignment
 ----------------------------------
@@ -70,6 +72,7 @@ would let deleting or corrupting one file remove every ceiling at once.
 from __future__ import annotations
 
 import json
+from datetime import datetime, timezone
 from enum import Enum
 from pathlib import Path
 from typing import Optional
@@ -93,23 +96,29 @@ WILDCARD = Capability.ALL.value
 class IdentityClassError(CapAuthError):
     """A subject's identity-class assignment could not be resolved.
 
-    Raised for an unreadable or malformed assignments file and for an assignment
-    naming a class that is not in the class table. Callers (the PDP) must treat
-    this as a deny: we know an assignment was intended but not what it permits.
+    Raised for a missing, unreadable, or malformed assignment and for an
+    assignment naming a class that is not in the class table. Callers (the PDP)
+    must treat every case as a deny because no ceiling could be established.
     """
 
 
 class IdentityClassName(str, Enum):
-    """The kinds of identity the fleet distinguishes.
+    """The capability-ceiling roles the fleet distinguishes.
 
     Values are the strings written into the assignments file, so they are part
-    of the on-disk format and must stay stable.
+    of the on-disk format and must stay stable. This registry is separate from
+    the five entity classes in the fqid grammar and may subdivide one grammar
+    class, as ``service`` and ``connector`` do.
     """
 
     #: A human operator. Holds the secrets, signs, mints, approves.
     OPERATOR = "operator"
     #: A software agent acting on an operator's behalf (lumina, jarvis, ...).
     AGENT = "agent"
+    #: An internal application or workload service with no external dispatch.
+    SERVICE = "service"
+    #: A service-spelled workload that may hold explicit external-effect grants.
+    CONNECTOR = "connector"
     #: A fleet machine: runs inference and reads state, never mints or signs.
     NODE = "node"
     #: A phone / tablet / browser at the edge. Narrowest of all.
@@ -216,6 +225,25 @@ _OPERATOR_ONLY_CAPABILITIES: tuple[str, ...] = (
     Capability.IDENTITY_SIGN.value,
 )
 
+# External effects named by the reviewed SKLegal policy. A generic service may
+# never exercise these. A connector may, but still needs a real capability grant
+# and every downstream human and resource-policy gate.
+EXTERNAL_EFFECT_CAPABILITIES: tuple[str, ...] = (
+    "action.email.dispatch",
+    "action.filing.dispatch",
+    "action.calendar.dispatch",
+    "action.service.dispatch",
+)
+
+# Dated, enumerated migration in the IDENTITY_NAMING_STANDARD section 2.6
+# shape. This is an in-memory compatibility assignment, not a second grammar
+# and not permission to enroll another unclassified subject. Persist the same
+# assignment with assign_identity_class() before the removal instant.
+UNCLASSIFIED_MIGRATION_REMOVAL_AT = datetime(2026, 9, 1, tzinfo=timezone.utc)
+UNCLASSIFIED_MIGRATION_ASSIGNMENTS: dict[str, str] = {
+    "device:ad80d077a047babf29eec97af454fdbc3b1c37d9": IdentityClassName.EDGE_DEVICE.value,
+}
+
 #: The process-wide identity-class table, keyed by class name value.
 #:
 #: Additive by design: a new class is a new row, and an existing class's ceiling
@@ -247,6 +275,29 @@ DEFAULT_CLASSES: dict[str, IdentityClass] = {
             "operator: no wildcard grant, no minting, no identity signing."
         ),
     ),
+    IdentityClassName.SERVICE.value: IdentityClass(
+        name=IdentityClassName.SERVICE,
+        allowed_capabilities=[WILDCARD],
+        forbidden_capabilities=[
+            *_OPERATOR_ONLY_CAPABILITIES,
+            *EXTERNAL_EFFECT_CAPABILITIES,
+        ],
+        minimum_mode=EnrollmentMode.VERIFIED,
+        description=(
+            "An internal application or workload service. Grants remain explicit, "
+            "operator powers and external dispatch are structurally forbidden."
+        ),
+    ),
+    IdentityClassName.CONNECTOR.value: IdentityClass(
+        name=IdentityClassName.CONNECTOR,
+        allowed_capabilities=[WILDCARD],
+        forbidden_capabilities=list(_OPERATOR_ONLY_CAPABILITIES),
+        minimum_mode=EnrollmentMode.VERIFIED,
+        description=(
+            "A service-spelled connector workload. It may hold explicit external-"
+            "effect grants, but never wildcard, token-issue, or identity-sign powers."
+        ),
+    ),
     IdentityClassName.NODE.value: IdentityClass(
         name=IdentityClassName.NODE,
         # Inference plus read scopes. Strict allowlist: a capability added to the
@@ -275,6 +326,9 @@ DEFAULT_CLASSES: dict[str, IdentityClass] = {
             "skchat.media.write",
             "skchat.voice",
             "skchat.calls",
+            "skdashboard.read",
+            "skdashboard.events.read",
+            "skdashboard.reports.read",
             *_MACHINE_READ_CAPABILITIES,
         ],
         forbidden_capabilities=list(_OPERATOR_ONLY_CAPABILITIES),
@@ -407,11 +461,12 @@ def resolve_identity_class(
     *,
     base_dir: Optional[Path] = None,
     classes: Optional[dict[str, IdentityClass]] = None,
-) -> Optional[IdentityClass]:
-    """The identity class assigned to ``subject``, or ``None`` if unclassified.
+) -> IdentityClass:
+    """Resolve the identity class assigned to ``subject`` or fail closed.
 
-    ``None`` is the default and the back-compatible answer: the PDP then applies
-    no ceiling and decides exactly as it did before this layer existed.
+    A dated, enumerated migration mapping may supply a temporary class before
+    its removal instant. It is a compatibility assignment, never an unbounded
+    skip. Every other unclassified subject raises immediately.
 
     Args:
         subject: The already-authenticated subject identity.
@@ -419,18 +474,15 @@ def resolve_identity_class(
         classes: Override the class table (defaults to :data:`DEFAULT_CLASSES`).
 
     Returns:
-        IdentityClass or None: The subject's class, or ``None`` when no
-        assignment exists for it.
+        IdentityClass: The subject's persisted or temporary migration class.
 
     Raises:
-        IdentityClassError: The assignments file is unusable, or the subject is
-            assigned to a class the table does not define. Both mean "a ceiling
-            was intended and we cannot tell what it is", which the PDP denies on.
+        IdentityClassError: The assignments file is unusable, the subject is
+            unclassified, or its persisted or migration class is absent from
+            the class table. The PDP denies every one of these states.
     """
     table = classes if classes is not None else DEFAULT_CLASSES
     assignments = load_assignments(base_dir)
-    if not assignments:
-        return None
 
     for key in _subject_keys(subject):
         name = assignments.get(key)
@@ -442,15 +494,32 @@ def resolve_identity_class(
                 f"subject {subject!r} is assigned to unknown identity class {name!r}"
             )
         return identity_class
-    return None
+
+    if datetime.now(timezone.utc) < UNCLASSIFIED_MIGRATION_REMOVAL_AT:
+        for key in _subject_keys(subject):
+            name = UNCLASSIFIED_MIGRATION_ASSIGNMENTS.get(key)
+            if name is None:
+                continue
+            identity_class = table.get(name)
+            if identity_class is None:
+                raise IdentityClassError(
+                    f"subject {subject!r} has migration assignment to unknown "
+                    f"identity class {name!r}"
+                )
+            return identity_class
+
+    raise IdentityClassError(f"subject {subject!r} has no identity class assignment")
 
 
 __all__ = [
     "DEFAULT_CLASSES",
+    "EXTERNAL_EFFECT_CAPABILITIES",
     "IDENTITY_CLASS_RELPATH",
     "IdentityClass",
     "IdentityClassError",
     "IdentityClassName",
+    "UNCLASSIFIED_MIGRATION_ASSIGNMENTS",
+    "UNCLASSIFIED_MIGRATION_REMOVAL_AT",
     "assign_identity_class",
     "load_assignments",
     "resolve_identity_class",

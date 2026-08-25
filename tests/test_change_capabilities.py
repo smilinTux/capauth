@@ -24,10 +24,11 @@ from pathlib import Path
 import pytest
 
 from capauth.authz import DEFAULT_RULES, decide
+from capauth.identity_class import IdentityClassName, assign_identity_class
 from capauth.pairing import EnrollmentMode, approve, enroll_device
+from capauth.tokens import issue_token
 
 from .conftest import enrolled_attested_credentials, enrolled_verified_credentials
-from capauth.tokens import issue_token
 
 SUBJECT = "alice@chef.skworld.io"
 PUBKEY = "-----BEGIN PGP PUBLIC KEY BLOCK-----\nfake\n-----END PGP PUBLIC KEY BLOCK-----"
@@ -45,7 +46,7 @@ VERIFIED_CAPABILITIES = ("change.cab_vote", "change.schedule", "change.deploy")
 
 # ``decide`` requires the granting token to carry a verifying signature, so
 # tokens here are issued SIGNED against the hermetic gpg stub (see conftest).
-pytestmark = pytest.mark.usefixtures("stub_token_signing")
+pytestmark = pytest.mark.usefixtures("stub_token_signing", "capability_rule_test_ceiling")
 
 
 # --------------------------------------------------------------------------- #
@@ -74,7 +75,9 @@ def _enroll(base: Path, *, mode: EnrollmentMode, subject: str = SUBJECT, scopes=
         subject=subject,
         **extra,
     )
-    return approve(enrollment.enrollment_id, "operator@chef.skworld", base_dir=base)
+    record = approve(enrollment.enrollment_id, "operator@chef.skworld", base_dir=base)
+    assign_identity_class(subject, IdentityClassName.OPERATOR, base_dir=base)
+    return record
 
 
 def _issue(base: Path, capabilities, *, subject: str = SUBJECT, ttl_hours=24):

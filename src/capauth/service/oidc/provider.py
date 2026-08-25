@@ -45,7 +45,7 @@ from ...exceptions import SubjectNamingError
 from ...subject import canonical_subject
 from ...tokens import TokenSigningError, export_token, mint_audience_token
 from .clients import ClientRegistry
-from .passkey import PasskeyStore, PasskeyStoreUnavailableError
+from .passkey import PasskeyRPUnavailableError, PasskeyStore, PasskeyStoreUnavailableError
 from .signing_key import SigningKey
 from .store import (
     AuthCodeStore,
@@ -194,8 +194,8 @@ _LOGIN_PAGE = """<!DOCTYPE html>
   <p class="sub">Authenticate to <strong>{client_name}</strong> with your PGP key.
      No password. Use a passkey if you already added one.</p>
 
-  <button id="pk-btn" onclick="passkeyLogin()" style="background:#0e7490">Sign in with a passkey (recommended)</button>
-  <p class="sub" style="font-size:.74rem;margin:.4rem 0 1rem">After one PGP-proven enrollment, passkey login needs no fingerprint or pasted signature.
+  <button id="pk-btn" onclick="passkeyLogin()" style="background:#0e7490">Sign in with a passkey</button>
+  <p class="sub" style="font-size:.74rem;margin:.4rem 0 1rem">Recommended after one PGP-proven enrollment. Passkey login then needs no fingerprint or pasted signature.
     <a href="{base_url}/oidc/passkey/enroll" style="color:#a78bfa">Add a passkey</a>
   </p>
 
@@ -205,7 +205,7 @@ _LOGIN_PAGE = """<!DOCTYPE html>
 
   <div class="step">1 — Your PGP fingerprint</div>
   <label for="fp">Fingerprint (40- or 64-hex chars)</label>
-  <input id="fp" type="text" maxlength="50" placeholder="ABCDEF0123..." autocomplete="off"/>
+  <input id="fp" type="text" maxlength="64" placeholder="ABCDEF0123..." autocomplete="off"/>
 
   <div class="step">2 - Exact message to sign</div>
   <div class="nonce-box" id="nonce">Enter your fingerprint to load the complete signed payload.</div>
@@ -611,12 +611,14 @@ _ENROLL_PAGE = """<!DOCTYPE html>
   </div>
 
   <div class="step">1 — Your PGP fingerprint</div>
-  <input id="fp" maxlength="50" placeholder="ABCDEF0123..." autocomplete="off"/>
-  <div class="step">2 — Challenge</div>
-  <div class="nonce-box" id="nonce">Enter your fingerprint to load a challenge…</div>
-  <div class="step">3 — PGP signature over the challenge</div>
+  <input id="fp" maxlength="64" placeholder="ABCDEF0123..." autocomplete="off"/>
+  <div class="step">2 - Exact message to sign</div>
+  <div class="nonce-box" id="nonce" style="white-space:pre-wrap">Enter your fingerprint to load the complete signed payload.</div>
+  <button type="button" onclick="copyPayload()" style="width:auto;padding:.45rem .7rem;font-size:.78rem;background:#334155">Copy message</button>
+  <div class="step">3 - PGP signed message or detached signature</div>
   <textarea id="sig" placeholder="-----BEGIN PGP MESSAGE-----"></textarea>
   <textarea id="pub" style="min-height:70px" placeholder="(first time) paste your public key"></textarea>
+  <p class="sub" style="font-size:.74rem">Copy the complete message, then use <code>gpg --armor --sign</code> for an inline signed message or <code>gpg --armor --detach-sign</code> for a detached signature.</p>
   <button onclick="enroll()">Prove with PGP &amp; create passkey</button>
   <div class="msg" id="msg"></div>
 </div>
@@ -626,7 +628,7 @@ _ENROLL_PAGE = """<!DOCTYPE html>
 <script>
 const BASE="{base_url}";
 window._capauthBase = BASE;
-let currentNonce=null;
+let currentNonce=null, currentPayload="";
 function msg(t,ok){{ const e=document.getElementById("msg"); e.textContent=t; e.className="msg "+(ok?"ok":"err"); }}
 async function enrollLocal(){{
   if(!window.capauthWebAuthn||!window.capauthWebAuthn.available()) return msg("This browser has no passkey support.",false);
@@ -645,10 +647,19 @@ async function loadChallenge(fp){{
   if(!r.ok) throw new Error(await r.text());
   return r.json();
 }}
+async function copyPayload(){{
+  if(!currentPayload) return msg("Enter a valid fingerprint to load a fresh challenge first.",false);
+  try{{ await navigator.clipboard.writeText(currentPayload); }}
+  catch(e){{ msg("Copy failed. Select the complete message and copy it manually.",false); }}
+}}
 document.getElementById("fp").addEventListener("blur",async function(){{
   const fp=this.value.trim().toUpperCase().replace(/\\s/g,"");
   if(![40,64].includes(fp.length)) return;
-  try{{ const ch=await loadChallenge(fp); currentNonce=ch.nonce; document.getElementById("nonce").textContent=ch.nonce;
+  try{{ const ch=await loadChallenge(fp); currentNonce=ch.nonce;
+    currentPayload=["CAPAUTH_NONCE_V1", "nonce="+ch.nonce,
+      "client_nonce="+ch.client_nonce_echo, "timestamp="+ch.timestamp,
+      "service="+ch.service, "expires="+ch.expires].join("\\n");
+    document.getElementById("nonce").textContent=currentPayload;
     if(window.capauth&&window.capauth.isCapAuth){{ try{{ const res=await window.capauth.signChallenge(ch);
       document.getElementById("sig").value=res.signature; }}catch(e){{}} }}
   }}catch(e){{ document.getElementById("nonce").textContent="Error: "+e.message; }}
@@ -704,7 +715,7 @@ def build_oidc_router(
     passkeys = (
         passkeys
         if passkeys is not None
-        else PasskeyStore(data_dir=os.environ.get("CAPAUTH_DATA_DIR", "/data"))
+        else PasskeyStore(data_dir=os.environ.get("CAPAUTH_PASSKEY_DATA_DIR"))
     )
 
     router = APIRouter(tags=["oidc-idp"])
@@ -713,6 +724,14 @@ def build_oidc_router(
     router.clients = clients  # type: ignore[attr-defined]
     router.store = store  # type: ignore[attr-defined]
     router.passkeys = passkeys  # type: ignore[attr-defined]
+
+    def _passkey_preflight() -> None:
+        try:
+            passkeys.preflight()
+        except PasskeyRPUnavailableError:
+            raise HTTPException(status_code=503, detail="passkey_rp_unavailable") from None
+        except PasskeyStoreUnavailableError:
+            raise HTTPException(status_code=503, detail="passkey_state_unavailable") from None
 
     def _authorize_dashboard_grant(subject: str) -> None:
         try:
@@ -1046,6 +1065,7 @@ def build_oidc_router(
         """Authorize passkey registration by verifying a PGP signature for the
         fingerprint, then return WebAuthn creation options + a binding ticket.
         A passkey can ONLY be registered for a fingerprint you can sign for."""
+        _passkey_preflight()
         body = await request.json()
         fingerprint = (body.get("fingerprint") or "").strip().upper()
         nonce_sig = (body.get("nonce_signature") or "").strip()
@@ -1081,6 +1101,8 @@ def build_oidc_router(
             raise HTTPException(status_code=400, detail="ticket + credential required")
         try:
             fp, cid = passkeys.complete_registration(ticket, credential)
+        except PasskeyRPUnavailableError:
+            raise HTTPException(status_code=503, detail="passkey_rp_unavailable")
         except PasskeyStoreUnavailableError:
             raise HTTPException(status_code=503, detail="passkey_state_unavailable")
         except Exception as exc:
@@ -1089,6 +1111,7 @@ def build_oidc_router(
 
     @router.post("/passkey/login/begin", summary="Begin passkey login")
     async def passkey_login_begin(request: Request) -> dict[str, Any]:
+        _passkey_preflight()
         body = await request.json()
         request_id = (body.get("request_id") or "").strip()
         fingerprint_hint = (body.get("fingerprint") or "").strip().upper()
@@ -1115,6 +1138,8 @@ def build_oidc_router(
             raise HTTPException(status_code=400, detail="credential required")
         try:
             fingerprint = passkeys.complete_authentication(request_id, credential)
+        except PasskeyRPUnavailableError:
+            raise HTTPException(status_code=503, detail="passkey_rp_unavailable")
         except PasskeyStoreUnavailableError:
             raise HTTPException(status_code=503, detail="passkey_state_unavailable")
         except Exception as exc:
@@ -1144,6 +1169,7 @@ def build_oidc_router(
 
     @router.get("/passkey/enroll", summary="Passkey enrollment page (PGP-gated)")
     async def passkey_enroll() -> Any:
+        _passkey_preflight()
         return HTMLResponse(content=_ENROLL_PAGE.format(base_url=issuer_url()))
 
     _JS_NO_CACHE = {"Cache-Control": "no-cache, no-store, must-revalidate"}  # noqa: N806

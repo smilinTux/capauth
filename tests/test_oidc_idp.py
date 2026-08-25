@@ -62,6 +62,8 @@ def client_registry() -> ClientRegistry:
 def oidc_app(monkeypatch, signing_key, client_registry, tmp_path):
     """A minimal FastAPI app mounting only the OIDC router, with PGP mocked."""
     monkeypatch.setenv("CAPAUTH_OIDC_ISSUER", ISSUER)
+    monkeypatch.setenv("CAPAUTH_WEBAUTHN_RP_ID", "capauth.test")
+    monkeypatch.setenv("CAPAUTH_PASSKEY_DATA_DIR", str(tmp_path / "passkeys"))
 
     store = AuthCodeStore(path=tmp_path / "oidc-state.db")
     router = build_oidc_router(signing_key=signing_key, clients=client_registry, store=store)
@@ -259,8 +261,8 @@ def test_login_page_documents_exact_signing_contract(oidc_app):
     )
 
     assert resp.status_code == 200
-    assert "Sign in with a passkey (recommended)" in resp.text
-    assert "After one PGP-proven enrollment" in resp.text
+    assert ">Sign in with a passkey<" in resp.text
+    assert "Recommended after one PGP-proven enrollment" in resp.text
     assert 'currentPayload=["CAPAUTH_NONCE_V1", "nonce="+ch.nonce' in resp.text
     assert '"client_nonce="+ch.client_nonce_echo' in resp.text
     assert '"timestamp="+ch.timestamp' in resp.text
@@ -271,6 +273,84 @@ def test_login_page_documents_exact_signing_contract(oidc_app):
     assert "capauth sign --nonce" not in resp.text
     assert "Sign on this device (key in your bunker)" in resp.text
     assert "Sign from another device (QR)" in resp.text
+
+
+def test_passkey_enrollment_page_documents_exact_signing_contract(oidc_app):
+    client, _router = oidc_app
+
+    response = client.get("/oidc/passkey/enroll")
+
+    assert response.status_code == 200
+    assert 'currentPayload=["CAPAUTH_NONCE_V1", "nonce="+ch.nonce' in response.text
+    assert '"client_nonce="+ch.client_nonce_echo' in response.text
+    assert '"timestamp="+ch.timestamp' in response.text
+    assert '"service="+ch.service' in response.text
+    assert '"expires="+ch.expires' in response.text
+    assert "gpg --armor --sign" in response.text
+    assert "gpg --armor --detach-sign" in response.text
+    assert 'maxlength="64"' in response.text
+
+
+def test_ip_issuer_passkey_preflight_denies_before_pgp_verification(oidc_app, monkeypatch):
+    client, _router = oidc_app
+    monkeypatch.setenv("CAPAUTH_OIDC_ISSUER", "https://100.81.238.58:8420")
+    monkeypatch.setenv("CAPAUTH_WEBAUTHN_RP_ID", "100.81.238.58")
+    calls = []
+
+    import capauth.authentik.stage as stage_mod
+
+    monkeypatch.setattr(
+        stage_mod,
+        "verify_auth_response",
+        lambda **kwargs: calls.append(kwargs) or (True, "", {}),
+    )
+
+    response = client.post(
+        "/oidc/passkey/register/begin",
+        json={
+            "fingerprint": TEST_FP,
+            "nonce": "sentinel-nonce",
+            "nonce_signature": "sentinel-signature",
+        },
+    )
+
+    assert response.status_code == 503
+    assert response.json() == {"detail": "passkey_rp_unavailable"}
+    assert calls == []
+
+
+def test_passkey_directory_does_not_redirect_oidc_state(
+    monkeypatch, tmp_path, signing_key, client_registry
+):
+    capauth_home = tmp_path / "capauth-home"
+    passkey_dir = tmp_path / "passkey-only"
+    monkeypatch.setenv("SKCAPSTONE_HOME", str(capauth_home))
+    monkeypatch.delenv("CAPAUTH_DATA_DIR", raising=False)
+    monkeypatch.delenv("CAPAUTH_OIDC_STATE_DB", raising=False)
+    monkeypatch.setenv("CAPAUTH_PASSKEY_DATA_DIR", str(passkey_dir))
+    monkeypatch.setenv("CAPAUTH_OIDC_ISSUER", ISSUER)
+    monkeypatch.setenv("CAPAUTH_WEBAUTHN_RP_ID", "capauth.test")
+
+    router = build_oidc_router(signing_key=signing_key, clients=client_registry)
+
+    assert router.passkeys._path == passkey_dir / "passkeys.json"
+    assert router.store.path != passkey_dir / "oidc_state.db"
+
+
+def test_shared_data_directory_cannot_enable_passkey_store(
+    monkeypatch, tmp_path, signing_key, client_registry
+):
+    shared_dir = tmp_path / "shared-service-state"
+    monkeypatch.setenv("CAPAUTH_DATA_DIR", str(shared_dir))
+    monkeypatch.delenv("CAPAUTH_PASSKEY_DATA_DIR", raising=False)
+    monkeypatch.setenv("CAPAUTH_OIDC_ISSUER", ISSUER)
+    monkeypatch.setenv("CAPAUTH_WEBAUTHN_RP_ID", "capauth.test")
+
+    router = build_oidc_router(signing_key=signing_key, clients=client_registry)
+
+    assert router.store.path == shared_dir / "oidc_state.db"
+    with pytest.raises(PasskeyStoreUnavailableError):
+        router.passkeys.preflight()
 
 
 def test_passkey_registration_persistence_failure_is_unavailable(oidc_app, monkeypatch):

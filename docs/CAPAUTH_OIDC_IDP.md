@@ -140,6 +140,14 @@ OIDC enrollment approval does not create that policy enrollment or grant.
 | `CAPAUTH_OIDC_CLIENTS_FILE` / `_JSON` | — | Static client registry. |
 | `CAPAUTH_OIDC_ID_TOKEN_TTL` | `300` | ID token lifetime in seconds, bounded to 1 through 300. |
 | `CAPAUTH_OIDC_ACCESS_TOKEN_TTL` | `300` | Access token lifetime in seconds, bounded to 1 through 300. |
+| `CAPAUTH_GPG_PASSPHRASE_FILE` | unset | Optional path to a nonempty regular mode-0600 file used to unlock the PGP capability-token signer. Invalid configuration fails closed as `signer_unavailable`. |
+
+When `CAPAUTH_GPG_PASSPHRASE_FILE` is unset, token signing keeps the existing
+GPG-agent-first behavior. When it is set, CapAuth makes one loopback signing
+attempt through GPG's native passphrase-file input. It never places passphrase
+bytes in command arguments or logs. The configured file must be nonempty,
+regular rather than a symlink, and exactly mode 0600. Missing or insecure files
+do not fall back to another signer.
 
 ### 2.5 Run it
 

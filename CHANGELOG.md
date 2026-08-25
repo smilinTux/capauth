@@ -6,6 +6,11 @@ All notable changes to `capauth` are documented here. The format is based on
 
 ## [Unreleased]
 
+- Added fail-closed `CAPAUTH_GPG_PASSPHRASE_FILE` support for unattended
+  capability-token signing. The configured file must be a nonempty regular
+  mode-0600 file, invalid configuration never falls back, and raw GPG stderr
+  and passphrase bytes never enter signing logs (card `1b553209`).
+
 - Fixed SKDashboard OIDC policy checks to use the canonical
   `device:<fingerprint>` subject stored by CapAuth pairing, while keeping OIDC
   approval separate from explicit signed read grants and logging only the safe

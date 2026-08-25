@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 import json
+import secrets
+import shutil
+import subprocess
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -10,6 +13,7 @@ import pytest
 
 from capauth.tokens import (
     TokenPayload,
+    TokenSigningError,
     TokenType,
     export_token,
     import_token,
@@ -17,6 +21,7 @@ from capauth.tokens import (
     issue_token,
     list_tokens,
     revoke_token,
+    signature_verifies,
     verify_token,
 )
 
@@ -340,6 +345,7 @@ def test_sign_payload_does_not_force_an_empty_passphrase_first(monkeypatch, tmp_
         return _Result()
 
     monkeypatch.setattr(tok.shutil, "which", lambda _n: "/usr/bin/gpg")
+    monkeypatch.delenv("CAPAUTH_GPG_PASSPHRASE_FILE", raising=False)
     monkeypatch.setattr(tok.subprocess, "run", fake_run)
     monkeypatch.setattr(tok, "_get_issuer_fingerprint", lambda _h: "DEADBEEF")
 
@@ -379,6 +385,7 @@ def test_sign_payload_falls_back_to_loopback_when_the_agent_path_fails(monkeypat
         return _Fail() if len(calls) == 1 else _Ok()
 
     monkeypatch.setattr(tok.shutil, "which", lambda _n: "/usr/bin/gpg")
+    monkeypatch.delenv("CAPAUTH_GPG_PASSPHRASE_FILE", raising=False)
     monkeypatch.setattr(tok.subprocess, "run", fake_run)
     monkeypatch.setattr(tok, "_get_issuer_fingerprint", lambda _h: "DEADBEEF")
 
@@ -406,6 +413,7 @@ def test_sign_payload_returns_none_when_every_attempt_fails(monkeypatch, tmp_pat
         stderr = "gpg: signing failed: No secret key"
 
     monkeypatch.setattr(tok.shutil, "which", lambda _n: "/usr/bin/gpg")
+    monkeypatch.delenv("CAPAUTH_GPG_PASSPHRASE_FILE", raising=False)
     monkeypatch.setattr(tok.subprocess, "run", lambda cmd, **kw: _Fail())
     monkeypatch.setattr(tok, "_get_issuer_fingerprint", lambda _h: "DEADBEEF")
 
@@ -417,3 +425,180 @@ def test_sign_payload_returns_none_when_every_attempt_fails(monkeypatch, tmp_pat
         capabilities=["x"],
     )
     assert tok._pgp_sign_payload(payload, tmp_path) is None
+
+
+def test_configured_passphrase_file_is_the_only_attempt_and_never_enters_logs(
+    monkeypatch, tmp_path, caplog
+):
+    """A valid file uses one loopback attempt without exposing its contents."""
+    from capauth import tokens as tok
+
+    synthetic_secret = secrets.token_urlsafe(24)
+    passphrase_file = tmp_path / "synthetic-passphrase"
+    passphrase_file.write_text(synthetic_secret, encoding="utf-8")
+    passphrase_file.chmod(0o600)
+    calls = []
+
+    class _Result:
+        returncode = 0
+        stdout = "-----BEGIN PGP SIGNATURE-----\nx\n-----END PGP SIGNATURE-----\n"
+        stderr = ""
+
+    def fake_run(cmd, **kwargs):
+        calls.append(cmd)
+        return _Result()
+
+    monkeypatch.setenv("CAPAUTH_GPG_PASSPHRASE_FILE", str(passphrase_file))
+    monkeypatch.setattr(tok.shutil, "which", lambda _n: "/usr/bin/gpg")
+    monkeypatch.setattr(tok.subprocess, "run", fake_run)
+    monkeypatch.setattr(tok, "_get_issuer_fingerprint", lambda _h: "DEADBEEF")
+    payload = tok.TokenPayload(
+        token_id="t",
+        token_type=tok.TokenType.CAPABILITY,
+        issuer="DEADBEEF",
+        subject="probe@example.org",
+        capabilities=["x"],
+    )
+
+    assert tok._pgp_sign_payload(payload, tmp_path) is not None
+    assert len(calls) == 1
+    assert "--passphrase-file" in calls[0]
+    assert "loopback" in calls[0]
+    assert synthetic_secret not in " ".join(calls[0])
+    assert synthetic_secret not in caplog.text
+
+
+def test_configured_passphrase_failure_never_logs_gpg_stderr(monkeypatch, tmp_path, caplog):
+    """Even adversarial subprocess output cannot copy a passphrase into logs."""
+    from capauth import tokens as tok
+
+    synthetic_secret = secrets.token_urlsafe(24)
+    passphrase_file = tmp_path / "synthetic-passphrase"
+    passphrase_file.write_text(synthetic_secret, encoding="utf-8")
+    passphrase_file.chmod(0o600)
+
+    class _Failure:
+        returncode = 2
+        stdout = ""
+        stderr = f"gpg repeated sensitive input: {synthetic_secret}"
+
+    monkeypatch.setenv("CAPAUTH_GPG_PASSPHRASE_FILE", str(passphrase_file))
+    monkeypatch.setattr(tok.shutil, "which", lambda _n: "/usr/bin/gpg")
+    monkeypatch.setattr(tok.subprocess, "run", lambda *_a, **_k: _Failure())
+    monkeypatch.setattr(tok, "_get_issuer_fingerprint", lambda _h: "DEADBEEF")
+    payload = tok.TokenPayload(
+        token_id="t",
+        token_type=tok.TokenType.CAPABILITY,
+        issuer="DEADBEEF",
+        subject="probe@example.org",
+        capabilities=["x"],
+    )
+
+    assert tok._pgp_sign_payload(payload, tmp_path) is None
+    assert synthetic_secret not in caplog.text
+    assert str(passphrase_file) not in caplog.text
+    assert "gpg exited 2" in caplog.text
+
+
+@pytest.mark.parametrize("invalid_kind", ["missing", "insecure", "empty", "symlink"])
+def test_invalid_configured_passphrase_file_fails_before_gpg(
+    monkeypatch, tmp_path, agent_home, invalid_kind, caplog
+):
+    """Any configured but unusable secret file leaves issuance unavailable."""
+    from capauth import tokens as tok
+
+    synthetic_secret = secrets.token_urlsafe(24)
+    passphrase_file = tmp_path / "synthetic-passphrase"
+    if invalid_kind == "missing":
+        pass
+    elif invalid_kind == "insecure":
+        passphrase_file.write_text(synthetic_secret, encoding="utf-8")
+        passphrase_file.chmod(0o640)
+    elif invalid_kind == "empty":
+        passphrase_file.touch(mode=0o600)
+    else:
+        target = tmp_path / "synthetic-target"
+        target.write_text(synthetic_secret, encoding="utf-8")
+        target.chmod(0o600)
+        passphrase_file.symlink_to(target)
+
+    monkeypatch.setenv("CAPAUTH_GPG_PASSPHRASE_FILE", str(passphrase_file))
+    monkeypatch.setattr(tok.shutil, "which", lambda _n: "/usr/bin/gpg")
+    monkeypatch.setattr(
+        tok.subprocess,
+        "run",
+        lambda *_a, **_k: pytest.fail("invalid passphrase file must fail before gpg"),
+    )
+
+    with pytest.raises(tok.TokenSigningError):
+        tok.issue_token(agent_home, "probe@example.org", ["x"], sign=True)
+
+    token_dir = agent_home / "security" / "tokens"
+    assert not token_dir.exists() or not list(token_dir.iterdir())
+    assert synthetic_secret not in caplog.text
+    assert str(passphrase_file) not in caplog.text
+
+
+@pytest.mark.skipif(shutil.which("gpg") is None, reason="gpg is required for synthetic signing")
+def test_synthetic_protected_key_signs_then_insecure_mode_fails(
+    monkeypatch, tmp_path, agent_home, caplog
+):
+    """A real protected key proves success and a mode change proves sensitivity."""
+    gnupg_home = tmp_path / "gnupg"
+    gnupg_home.mkdir(mode=0o700)
+    monkeypatch.setenv("GNUPGHOME", str(gnupg_home))
+    synthetic_secret = secrets.token_urlsafe(24)
+    passphrase_file = tmp_path / "synthetic-passphrase"
+    passphrase_file.write_text(synthetic_secret, encoding="utf-8")
+    passphrase_file.chmod(0o600)
+    monkeypatch.setenv("CAPAUTH_GPG_PASSPHRASE_FILE", str(passphrase_file))
+    uid = "CapAuth Passphrase File Test <passphrase-file@capauth.local>"
+    subprocess.run(
+        [
+            "gpg",
+            "--batch",
+            "--quiet",
+            "--pinentry-mode",
+            "loopback",
+            "--passphrase-file",
+            str(passphrase_file),
+            "--quick-generate-key",
+            uid,
+            "ed25519",
+            "sign",
+            "1d",
+        ],
+        capture_output=True,
+        check=True,
+        timeout=60,
+    )
+    listing = subprocess.run(
+        ["gpg", "--batch", "--with-colons", "--list-secret-keys", uid],
+        capture_output=True,
+        text=True,
+        check=True,
+        timeout=30,
+    )
+    fingerprint = next(
+        line.split(":")[9] for line in listing.stdout.splitlines() if line.startswith("fpr:")
+    )
+    identity_path = agent_home / "identity" / "identity.json"
+    identity = json.loads(identity_path.read_text(encoding="utf-8"))
+    identity["fingerprint"] = fingerprint
+    identity_path.write_text(json.dumps(identity), encoding="utf-8")
+
+    try:
+        token = issue_token(agent_home, "probe@example.org", ["x"], sign=True, store=False)
+        assert token.signature
+        assert signature_verifies(token) is True
+
+        passphrase_file.chmod(0o640)
+        with pytest.raises(TokenSigningError):
+            issue_token(agent_home, "probe@example.org", ["x"], sign=True, store=False)
+        assert synthetic_secret not in caplog.text
+    finally:
+        subprocess.run(
+            ["gpgconf", "--homedir", str(gnupg_home), "--kill", "gpg-agent"],
+            capture_output=True,
+            timeout=30,
+        )

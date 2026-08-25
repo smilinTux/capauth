@@ -25,7 +25,9 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import os
 import shutil
+import stat
 import subprocess
 from datetime import datetime, timedelta, timezone
 from enum import Enum
@@ -39,6 +41,8 @@ from .exceptions import CapAuthError
 from .manifest import verify_manifest
 
 logger = logging.getLogger("capauth.tokens")
+
+_GPG_PASSPHRASE_FILE_ENV = "CAPAUTH_GPG_PASSPHRASE_FILE"
 
 
 class TokenSigningError(CapAuthError):
@@ -838,9 +842,9 @@ def _pgp_sign_payload(payload: TokenPayload, home: Path) -> Optional[str]:
     # agent-managed key with "No passphrase given" instead of consulting the
     # agent. Every token this fleet ever issued came out unsigned as a result,
     # regardless of which key was configured, and nothing noticed because
-    # issue_token treats a signing failure as a warning and stores the token
-    # anyway. Verified 2026-08-14: same key, same payload, plain form rc=0,
-    # loopback form rc=2.
+    # issue_token historically treated a signing failure as a warning and
+    # stored the token anyway. Verified 2026-08-14: same key, same payload,
+    # plain form rc=0, loopback form rc=2.
     base = [
         "gpg",
         "--batch",
@@ -850,9 +854,24 @@ def _pgp_sign_payload(payload: TokenPayload, home: Path) -> Optional[str]:
         "--local-user",
         issuer_fp,
     ]
-    attempts = [base, base + ["--passphrase", "", "--pinentry-mode", "loopback"]]
 
-    last_err = ""
+    configured, passphrase_file = _configured_gpg_passphrase_file()
+    if configured:
+        if passphrase_file is None:
+            return None
+        attempts = [
+            base
+            + [
+                "--pinentry-mode",
+                "loopback",
+                "--passphrase-file",
+                str(passphrase_file),
+            ]
+        ]
+    else:
+        attempts = [base, base + ["--passphrase", "", "--pinentry-mode", "loopback"]]
+
+    last_failure = "no signing attempt completed"
     for cmd in attempts:
         try:
             result = subprocess.run(
@@ -864,12 +883,44 @@ def _pgp_sign_payload(payload: TokenPayload, home: Path) -> Optional[str]:
             )
             if result.returncode == 0 and result.stdout.strip():
                 return result.stdout
-            last_err = result.stderr.strip()
-        except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as exc:
-            last_err = str(exc)
+            last_failure = f"gpg exited {result.returncode}"
+        except subprocess.TimeoutExpired:
+            last_failure = "gpg timed out"
+        except (subprocess.CalledProcessError, OSError):
+            last_failure = "gpg execution failed"
 
-    logger.warning("GPG signing failed for %s: %s", issuer_fp, last_err)
+    # GPG stderr may repeat pinentry input or other sensitive operator context.
+    # Keep the failure actionable without copying subprocess output into logs.
+    logger.warning("GPG signing failed for %s (%s)", issuer_fp, last_failure)
     return None
+
+
+def _configured_gpg_passphrase_file() -> tuple[bool, Optional[Path]]:
+    """Resolve a strict passphrase file without ever reading or logging it.
+
+    Returns ``(False, None)`` when the feature is not configured. Once the
+    environment variable is set, every invalid shape returns ``(True, None)``
+    so signing fails closed instead of silently falling back to gpg-agent or an
+    empty passphrase.
+    """
+    raw = os.environ.get(_GPG_PASSPHRASE_FILE_ENV)
+    if raw is None:
+        return False, None
+    if not raw.strip():
+        logger.warning("Configured GPG passphrase file is unavailable or insecure")
+        return True, None
+
+    path = Path(raw).expanduser()
+    try:
+        info = path.lstat()
+    except OSError:
+        logger.warning("Configured GPG passphrase file is unavailable or insecure")
+        return True, None
+
+    if not stat.S_ISREG(info.st_mode) or stat.S_IMODE(info.st_mode) != 0o600 or info.st_size == 0:
+        logger.warning("Configured GPG passphrase file is unavailable or insecure")
+        return True, None
+    return True, path
 
 
 def _pgp_verify_signature(

@@ -127,19 +127,16 @@ class PasskeyStore:
     def _storage_preflight(self) -> None:
         if self._dir is None or self._path is None:
             raise PasskeyStoreUnavailableError("passkey data directory is not configured")
+        if self._dir.is_symlink():
+            raise PasskeyStoreUnavailableError("passkey data directory is unavailable")
         if self._dir.exists():
-            if (
-                self._dir.is_symlink()
-                or not self._dir.is_dir()
-                or stat.S_IMODE(self._dir.stat().st_mode) & 0o077
-            ):
+            if not self._dir.is_dir() or stat.S_IMODE(self._dir.stat().st_mode) & 0o077:
                 raise PasskeyStoreUnavailableError("passkey data directory is unavailable")
-        if self._path.exists() and (
-            self._path.is_symlink()
-            or not self._path.is_file()
-            or stat.S_IMODE(self._path.stat().st_mode) != 0o600
-        ):
+        if self._path.is_symlink():
             raise PasskeyStoreUnavailableError("passkey state is unavailable")
+        if self._path.exists():
+            if not self._path.is_file() or stat.S_IMODE(self._path.stat().st_mode) != 0o600:
+                raise PasskeyStoreUnavailableError("passkey state is unavailable")
 
     def preflight(self) -> tuple[str, str]:
         """Validate isolated storage and WebAuthn configuration without mutation."""

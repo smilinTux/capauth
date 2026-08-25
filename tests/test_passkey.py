@@ -136,6 +136,21 @@ def test_passkey_store_rejects_broad_directory_permissions(env, tmp_path):
         PasskeyStore(data_dir=str(tmp_path)).preflight()
 
 
+def test_passkey_store_rejects_dangling_directory_symlink(env, tmp_path):
+    data_dir = tmp_path / "passkeys-link"
+    data_dir.symlink_to(tmp_path / "missing-directory", target_is_directory=True)
+
+    with pytest.raises(PasskeyStoreUnavailableError):
+        PasskeyStore(data_dir=str(data_dir))
+
+
+def test_passkey_store_rejects_dangling_state_symlink(env, tmp_path):
+    (tmp_path / "passkeys.json").symlink_to(tmp_path / "missing-state.json")
+
+    with pytest.raises(PasskeyStoreUnavailableError):
+        PasskeyStore(data_dir=str(tmp_path))
+
+
 def test_full_register_then_authenticate(env, tmp_path):
     origin, _ = rp_origin_and_id()
     store = PasskeyStore(data_dir=str(tmp_path))

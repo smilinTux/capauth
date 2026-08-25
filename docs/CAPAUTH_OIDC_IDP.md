@@ -125,6 +125,11 @@ an ID token, an opaque refresh token, and a canonical signed audience token.
 The refresh token is for the confidential server-side client only and must
 never enter browser storage, URLs, logs, or metrics.
 
+The OIDC `sub` remains the enrolled PGP fingerprint. For the separate policy
+decision, CapAuth maps that fingerprint to the canonical
+`device:<fingerprint>` subject used by pairing and signed capability grants.
+OIDC enrollment approval does not create that policy enrollment or grant.
+
 ### 2.4 Other env knobs
 
 | Env | Default | Meaning |

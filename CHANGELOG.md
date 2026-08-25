@@ -6,6 +6,10 @@ All notable changes to `capauth` are documented here. The format is based on
 
 ## [Unreleased]
 
+- Prevent forced-standalone and absent-integration schedule cleanup from
+  resolving or calling the SKCapstone scheduler. Integrated sandbox cleanup
+  remains idempotent (card `51f6507b`).
+
 - Bind passkeys to an explicit named HTTPS WebAuthn RP and a dedicated
   `CAPAUTH_PASSKEY_DATA_DIR`. Unsafe, implicit, IP-address, or mismatched RP
   configuration now fails before PGP proof verification, while unrelated OIDC

@@ -188,10 +188,10 @@ def ensure_schedule(interval_hours: float = 24.0) -> bool:
 
 
 def unregister_schedule() -> bool:
-    """Remove the key-rotation check drop-in from the fleet scheduler."""
-    sdk = _get_sdk()
-    if sdk is None:
+    """Remove the key-rotation check only when fleet integration is active."""
+    if not is_present():
         return False
+    sdk = _get_sdk()
     try:
         return bool(sdk.unregister_job(ROTATION_JOB))
     except Exception as exc:  # pragma: no cover - defensive

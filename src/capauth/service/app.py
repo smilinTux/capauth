@@ -609,7 +609,10 @@ async def oidc_discovery() -> dict[str, Any]:
       token_endpoint         → /capauth/v1/verify     (exchange signed nonce for JWT)
       userinfo_endpoint      → /capauth/v1/userinfo   (return claims from JWT)
     """
-    base = os.environ.get("CAPAUTH_BASE_URL", f"https://{SERVICE_ID}")
+    base = os.environ.get(
+        "CAPAUTH_BASE_URL",
+        os.environ.get("CAPAUTH_OIDC_ISSUER", f"https://{SERVICE_ID}"),
+    ).rstrip("/")
     return {
         "issuer": base,
         "authorization_endpoint": f"{base}/capauth/v1/challenge",

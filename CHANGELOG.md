@@ -6,6 +6,8 @@ All notable changes to `capauth` are documented here. The format is based on
 
 ## [Unreleased]
 
+- Prefer the explicit OIDC issuer for root discovery instead of the placeholder service identity.
+
 - Added fail-closed `CAPAUTH_GPG_PASSPHRASE_FILE` support for unattended
   capability-token signing. The configured file must be a nonempty regular
   mode-0600 file, invalid configuration never falls back, and raw GPG stderr

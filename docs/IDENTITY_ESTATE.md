@@ -9,6 +9,12 @@ The workflow is read-only. It never removes a key and never emits private key or
 passphrase bytes. An optional evidence file contains paths, primary
 fingerprints, manifest digest, classifications, and results.
 
+Retired quarantine records may declare an exact `members` list. The estate
+doctor verifies the encrypted `.tar.gpg` envelope and hash by default. A
+bounded decrypt check may be requested with `doctor estate --passphrase-file`
+using a mode-0600 passphrase file. Passphrase bytes, decrypted contents, and
+GnuPG stderr are never emitted.
+
 ## Authoritative manifest
 
 Keep `estate.json` in the CapAuth home or pass it explicitly with `--manifest`.

@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import hashlib
+import io
 import json
+import tarfile
 from pathlib import Path
 from unittest.mock import Mock, patch
 
@@ -29,6 +31,8 @@ from capauth.estate import (
     discover_roots,
     scan_gpg_keyring,
     scan_identity_roots,
+    QuarantineEvidence,
+    quarantine_archive_metadata,
 )
 
 
@@ -298,3 +302,82 @@ def test_cli_json_supports_explicit_alternate_home(tmp_path: Path) -> None:
 
     assert result.exit_code == 0, result.output
     assert json.loads(result.output)["overall"] == "OK"
+
+
+def _encrypted_fixture_archive(path: Path) -> Path:
+    path.write_bytes(b"-----BEGIN PGP MESSAGE-----\nsynthetic\n")
+    return path
+
+
+def _tar_bytes(names: tuple[str, ...]) -> bytes:
+    stream = io.BytesIO()
+    with tarfile.open(fileobj=stream, mode="w:") as archive:
+        for name in names:
+            info = tarfile.TarInfo(name)
+            info.size = 0
+            archive.addfile(info)
+    return stream.getvalue()
+
+
+def test_quarantine_archive_decrypts_and_matches_members(tmp_path: Path) -> None:
+    archive = _encrypted_fixture_archive(tmp_path / "custody.tar.gpg")
+    passphrase = tmp_path / "passphrase"
+    passphrase.write_text("synthetic", encoding="utf-8")
+    passphrase.chmod(0o600)
+    evidence = QuarantineEvidence(
+        archive=archive,
+        sha256=hashlib.sha256(archive.read_bytes()).hexdigest(),
+        verified_at="2026-08-25T00:00:00Z",
+        verified_by="synthetic-test",
+        members=("identity/public.asc", "manifest.json"),
+    )
+
+    def fake_gpg(command, **kwargs):
+        kwargs["stdout"].write(_tar_bytes(evidence.members))
+        return Mock(returncode=0, stderr=b"secret stderr")
+
+    with patch("capauth.estate.subprocess.run", side_effect=fake_gpg):
+        finding = quarantine_archive_metadata(evidence, passphrase_file=passphrase)
+    assert finding.status is EstateStatus.OK
+    assert "secret" not in finding.detail
+
+
+def test_quarantine_archive_wrong_passphrase_fails_without_stderr(tmp_path: Path) -> None:
+    archive = _encrypted_fixture_archive(tmp_path / "custody.tar.gpg")
+    passphrase = tmp_path / "passphrase"
+    passphrase.write_text("wrong", encoding="utf-8")
+    passphrase.chmod(0o600)
+    evidence = QuarantineEvidence(
+        archive=archive,
+        sha256=hashlib.sha256(archive.read_bytes()).hexdigest(),
+        verified_at="2026-08-25T00:00:00Z",
+        verified_by="synthetic-test",
+        members=("manifest.json",),
+    )
+    with patch(
+        "capauth.estate.subprocess.run",
+        return_value=Mock(returncode=2, stderr=b"wrong passphrase secret"),
+    ) as run:
+        finding = quarantine_archive_metadata(evidence, passphrase_file=passphrase)
+    assert finding.status is EstateStatus.FAIL
+    assert "wrong passphrase secret" not in finding.detail
+    run.assert_called_once()
+
+
+def test_quarantine_archive_rejects_insecure_passphrase_file(tmp_path: Path) -> None:
+    archive = _encrypted_fixture_archive(tmp_path / "custody.tar.gpg")
+    passphrase = tmp_path / "passphrase"
+    passphrase.write_text("synthetic", encoding="utf-8")
+    passphrase.chmod(0o644)
+    evidence = QuarantineEvidence(
+        archive=archive,
+        sha256=hashlib.sha256(archive.read_bytes()).hexdigest(),
+        verified_at="2026-08-25T00:00:00Z",
+        verified_by="synthetic-test",
+        members=("identity/private.asc",),
+    )
+
+    finding = quarantine_archive_metadata(evidence, passphrase_file=passphrase)
+
+    assert finding.status is EstateStatus.FAIL
+    assert "insecure" in finding.detail

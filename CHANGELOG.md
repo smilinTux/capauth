@@ -6,6 +6,10 @@ All notable changes to `capauth` are documented here. The format is based on
 
 ## [Unreleased]
 
+- Add a secret-free `.tar.gpg` quarantine verification path with optional
+  passphrase-file decryption and exact declared member matching (card
+  `cc3a970a`).
+
 - Make the Nextcloud custody check explicitly optional for PGP-only
   installations while preserving required-key and permission failures (card
   `8e86d22a`).

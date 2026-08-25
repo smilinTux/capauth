@@ -1939,6 +1939,12 @@ def doctor_custody(
     default=False,
     help="Emit the report as JSON for automation.",
 )
+@click.option(
+    "--passphrase-file",
+    type=click.Path(path_type=Path, dir_okay=False),
+    default=None,
+    help="Approved passphrase-file path for bounded quarantine verification; value is never logged.",
+)
 @click.pass_context
 def doctor_estate(
     ctx: click.Context,
@@ -1949,6 +1955,7 @@ def doctor_estate(
     include_gpg: bool,
     evidence: Optional[Path],
     json_out: bool,
+    passphrase_file: Optional[Path],
 ) -> None:
     """Find legacy, retired, conflicted, or unsafely synced key copies.
 
@@ -1975,6 +1982,7 @@ def doctor_estate(
             explicit_roots=identity_roots,
             syncthing_configs=config_pairs,
             include_gpg=include_gpg,
+            passphrase_file=passphrase_file,
         )
     except (OSError, ValueError) as exc:
         raise click.ClickException(str(exc)) from exc

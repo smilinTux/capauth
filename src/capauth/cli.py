@@ -1845,14 +1845,24 @@ def doctor(ctx: click.Context) -> None:
     default=None,
     help="Freshness window for the backup check (default 14).",
 )
+@click.option(
+    "--require-nextcloud-signing-key/--no-require-nextcloud-signing-key",
+    default=None,
+    help="Require the Nextcloud key, or explicitly mark that integration as disabled.",
+)
 @click.pass_context
-def doctor_custody(ctx: click.Context, json_out: bool, max_backup_age_days: Optional[int]) -> None:
+def doctor_custody(
+    ctx: click.Context,
+    json_out: bool,
+    max_backup_age_days: Optional[int],
+    require_nextcloud_signing_key: Optional[bool],
+) -> None:
     """Verify key-custody preconditions (exits nonzero on any FAIL).
 
     Checks that identity material is present, the private key is not
     group/world readable, the key is not revoked/expired, a root revocation
     certificate exists, the keystore is intact, a recent backup exists and is
-    restorable, and the Nextcloud signing key is present. No secret material is
+    restorable, and the Nextcloud signing key is present when required. No secret material is
     ever printed - only paths, public fingerprints, mtimes, sizes, and pass/fail.
     """
     import json as _json
@@ -1872,6 +1882,7 @@ def doctor_custody(ctx: click.Context, json_out: bool, max_backup_age_days: Opti
         max_backup_age_days=(
             max_backup_age_days if max_backup_age_days is not None else DEFAULT_MAX_BACKUP_AGE_DAYS
         ),
+        require_nextcloud_signing_key=require_nextcloud_signing_key,
     )
     if json_out:
         click.echo(_json.dumps(report_to_dict(results), indent=2))

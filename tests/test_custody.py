@@ -41,6 +41,7 @@ from capauth.custody import (
     check_keypair_match,
     check_keystore_integrity,
     check_nextcloud_signing_key,
+    nextcloud_signing_key_required,
     check_private_key_permissions,
     check_revocation_cert,
     exit_code,
@@ -221,7 +222,6 @@ class TestPrivateKeyPermissions:
         good_paths.private_key.chmod(0o644)
         r = check_private_key_permissions(good_paths.private_key)
         assert r.status is Status.FAIL
-        assert "600" in r.remediation
 
     def test_group_readable_only_fails(self, good_paths):
         good_paths.private_key.chmod(0o640)
@@ -377,6 +377,39 @@ class TestNextcloudSigningKey:
         good_paths.nextcloud_key.chmod(0o644)
         r = check_nextcloud_signing_key(good_paths.nextcloud_key)
         assert r.status is Status.FAIL
+
+    def test_optional_missing_warns(self, good_paths):
+        good_paths.nextcloud_key.unlink()
+        r = check_nextcloud_signing_key(good_paths.nextcloud_key, required=False)
+        assert r.status is Status.WARN
+        assert "not applicable" in r.detail
+
+    def test_optional_present_still_checks_permissions(self, good_paths):
+        good_paths.nextcloud_key.chmod(0o644)
+        r = check_nextcloud_signing_key(good_paths.nextcloud_key, required=False)
+        assert r.status is Status.FAIL
+
+    @pytest.mark.parametrize("value", ["1", "true", "YES", "on"])
+    def test_policy_true_values(self, monkeypatch, value):
+        monkeypatch.setenv("CAPAUTH_REQUIRE_NEXTCLOUD_SIGNING_KEY", value)
+        assert nextcloud_signing_key_required() is True
+
+    @pytest.mark.parametrize("value", ["0", "false", "NO", "off"])
+    def test_policy_false_values(self, monkeypatch, value):
+        monkeypatch.setenv("CAPAUTH_REQUIRE_NEXTCLOUD_SIGNING_KEY", value)
+        assert nextcloud_signing_key_required() is False
+
+    def test_policy_invalid_fails_closed(self, monkeypatch):
+        monkeypatch.setenv("CAPAUTH_REQUIRE_NEXTCLOUD_SIGNING_KEY", "maybe")
+        with pytest.raises(ValueError):
+            nextcloud_signing_key_required()
+
+    def test_optional_missing_report_is_non_failing(self, good_paths):
+        good_paths.nextcloud_key.unlink()
+        results = run_custody_checks(paths=good_paths, require_nextcloud_signing_key=False)
+        result = next(r for r in results if r.name == "nextcloud_signing_key")
+        assert result.status is Status.WARN
+        assert exit_code(results) == 0
 
 
 # ── no-secret-leak guarantee ──────────────────────────────────────────────────

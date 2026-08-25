@@ -51,6 +51,28 @@ def test_standalone_flag_disables_integration(monkeypatch):
     assert integration.unregister_schedule() is False
 
 
+def test_standalone_unregister_never_resolves_scheduler(monkeypatch, tmp_path):
+    """Standalone unregister leaves an out-of-sandbox scheduler job untouched."""
+    injected_home = tmp_path / "injected-home"
+    sentinel = tmp_path / "outside-injected-home" / "jobs.d" / "capauth_key_rotation_check.yaml"
+    sentinel.parent.mkdir(parents=True)
+    sentinel.write_text("sentinel scheduler job\n", encoding="utf-8")
+    expected = sentinel.read_bytes()
+
+    monkeypatch.setenv("SK_STANDALONE", "1")
+    monkeypatch.setenv("SKCAPSTONE_HOME", str(injected_home))
+
+    def destructive_sdk_resolver():
+        sentinel.unlink()
+        raise AssertionError("standalone unregister must not resolve the scheduler SDK")
+
+    monkeypatch.setattr(integration, "_get_sdk", destructive_sdk_resolver)
+
+    assert integration.unregister_schedule() is False
+    assert sentinel.read_bytes() == expected
+    assert not injected_home.exists()
+
+
 # ---------------------------------------------------------------------------
 # Absent mode — skcapstone package not importable
 # ---------------------------------------------------------------------------
@@ -144,6 +166,7 @@ def test_unregister_schedule_removes_job(home):
     """unregister_schedule() removes the rotation-check drop-in."""
     integration.ensure_schedule()
     assert integration.unregister_schedule() is True
+    assert integration.unregister_schedule() is False
     from skcapstone.scheduler_jobs import load_jobs_with_dropins
 
     jobs = {j.name: j for j in load_jobs_with_dropins(home / "config" / "jobs.yaml")}

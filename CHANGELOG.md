@@ -6,6 +6,11 @@ All notable changes to `capauth` are documented here. The format is based on
 
 ## [Unreleased]
 
+- Fixed SKDashboard OIDC policy checks to use the canonical
+  `device:<fingerprint>` subject stored by CapAuth pairing, while keeping OIDC
+  approval separate from explicit signed read grants and logging only the safe
+  rejecting policy branch (card `98357cac`).
+
 - Fail closed when passkey credentials or updated counters cannot be loaded or
   atomically persisted, and require an explicit durable service data directory.
 

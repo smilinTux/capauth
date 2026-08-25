@@ -11,6 +11,7 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+from capauth.pairing import EnrollmentMode, approve, enroll_device, revoke
 from capauth.service.oidc.clients import ClientRegistry, OIDCClient
 from capauth.service.oidc.provider import (
     SESSION_POLICY_VERSION,
@@ -20,7 +21,7 @@ from capauth.service.oidc.provider import (
 )
 from capauth.service.oidc.signing_key import SigningKey
 from capauth.service.oidc.store import AuthCodeStore, InvalidGrantError
-from capauth.tokens import TokenSigningError
+from capauth.tokens import TokenSigningError, issue_token
 
 SUBJECT = "A" * 40
 SECRET = "dashboard-secret"
@@ -70,8 +71,9 @@ def test_refresh_rotation_rejects_client_substitution_and_revokes_family(tmp_pat
 
 
 @pytest.fixture
-def refresh_app(monkeypatch, tmp_path):
+def refresh_app(monkeypatch, tmp_path, stub_token_signing):
     monkeypatch.setenv("CAPAUTH_OIDC_ISSUER", "https://capauth.test")
+    monkeypatch.setenv("CAPAUTH_HOME", str(tmp_path))
     registry = ClientRegistry(
         [
             OIDCClient(
@@ -92,9 +94,25 @@ def refresh_app(monkeypatch, tmp_path):
         "get_keystore",
         lambda: SimpleNamespace(get=lambda _subject: SimpleNamespace(approved=True)),
     )
-    monkeypatch.setattr(provider, "decide", lambda *_a, **_k: SimpleNamespace(allow=True))
     monkeypatch.setattr(provider, "mint_audience_token", lambda *_a, **_k: object())
     monkeypatch.setattr(provider, "export_token", lambda _token: '{"signed":"audience"}')
+
+    policy_subject = f"device:{SUBJECT.lower()}"
+    enrollment = enroll_device(
+        "PUBLIC-KEY",
+        list(SKDASHBOARD_SCOPES),
+        mode=EnrollmentMode.TOFU,
+        base_dir=tmp_path,
+        subject=policy_subject,
+    )
+    device = approve(enrollment.enrollment_id, "operator@chef.skworld.io", base_dir=tmp_path)
+    issue_token(
+        home=tmp_path,
+        subject=policy_subject,
+        capabilities=list(SKDASHBOARD_SCOPES),
+        ttl_hours=1,
+        sign=True,
+    )
     app = FastAPI()
     app.include_router(
         build_oidc_router(
@@ -104,7 +122,7 @@ def refresh_app(monkeypatch, tmp_path):
         ),
         prefix="/oidc",
     )
-    return SimpleNamespace(client=TestClient(app), store=store)
+    return SimpleNamespace(client=TestClient(app), store=store, device=device, home=tmp_path)
 
 
 def _refresh(client: TestClient, token: str):
@@ -132,10 +150,35 @@ def _authorization_code(store: AuthCodeStore, scope: str):
     return store.complete_login_request(request.request_id, SUBJECT, {})[1].code
 
 
-def test_authorization_code_creates_exact_family_and_keeps_id_token(refresh_app):
+def test_canonical_policy_grant_exchanges_once_and_keeps_id_token(refresh_app):
+    """A canonical policy grant authorizes the raw-fingerprint OIDC record once."""
     code = _authorization_code(
         refresh_app.store, "openid skdashboard.read skdashboard.events.read"
     )
+    form = {
+        "grant_type": "authorization_code",
+        "code": code,
+        "redirect_uri": REDIRECT,
+        "client_id": SKDASHBOARD_AUDIENCE,
+        "client_secret": SECRET,
+        "code_verifier": VERIFIER,
+    }
+    response = refresh_app.client.post("/oidc/token", data=form)
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["id_token"]
+    assert body["refresh_token"]
+    assert body["scope"].split() == list(SKDASHBOARD_SCOPES)
+    assert refresh_app.store.inspect_refresh_token(body["refresh_token"]).subject == SUBJECT
+    assert refresh_app.client.post("/oidc/token", data=form).status_code == 400
+
+
+def test_oidc_approval_does_not_replace_policy_enrollment(refresh_app):
+    revoke(refresh_app.device.device_id, "qualification", base_dir=refresh_app.home)
+    code = _authorization_code(
+        refresh_app.store, "openid skdashboard.read skdashboard.events.read"
+    )
+
     response = refresh_app.client.post(
         "/oidc/token",
         data={
@@ -147,12 +190,9 @@ def test_authorization_code_creates_exact_family_and_keeps_id_token(refresh_app)
             "code_verifier": VERIFIER,
         },
     )
-    assert response.status_code == 200, response.text
-    body = response.json()
-    assert body["id_token"]
-    assert body["refresh_token"]
-    assert body["scope"].split() == list(SKDASHBOARD_SCOPES)
-    assert refresh_app.store.inspect_refresh_token(body["refresh_token"]).subject == SUBJECT
+
+    assert response.status_code == 403
+    assert response.json()["detail"] == "grant_not_current"
 
 
 def test_refresh_endpoint_returns_only_exact_bounded_authority(refresh_app):

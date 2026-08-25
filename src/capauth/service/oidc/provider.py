@@ -41,6 +41,8 @@ from fastapi.responses import HTMLResponse
 from ... import resolve_capauth_home
 from ...authentik.claims_mapper import preferred_username_fallback
 from ...authz import decide
+from ...exceptions import SubjectNamingError
+from ...subject import canonical_subject
 from ...tokens import TokenSigningError, export_token, mint_audience_token
 from .clients import ClientRegistry
 from .passkey import PasskeyStore, PasskeyStoreUnavailableError
@@ -714,9 +716,14 @@ def build_oidc_router(
 
     def _authorize_dashboard_grant(subject: str) -> None:
         try:
+            policy_subject = canonical_subject(f"device:{subject}")
+        except SubjectNamingError:
+            logger.warning("OIDC dashboard grant denied: invalid policy subject")
+            raise HTTPException(status_code=403, detail="grant_not_current")
+        try:
             decisions = [
                 decide(
-                    subject,
+                    policy_subject,
                     scope,
                     resource={"audience": SKDASHBOARD_AUDIENCE},
                     context={"purpose": "oidc_session_refresh"},
@@ -727,6 +734,12 @@ def build_oidc_router(
         except Exception:
             raise HTTPException(status_code=503, detail="policy_unavailable")
         if not all(decision.allow for decision in decisions):
+            denied = [
+                scope
+                for scope, decision in zip(SKDASHBOARD_SCOPES, decisions)
+                if not decision.allow
+            ]
+            logger.warning("OIDC dashboard grant denied by policy for scopes=%s", ",".join(denied))
             raise HTTPException(status_code=403, detail="grant_not_current")
 
     def _mint_dashboard_access(subject: str, family_id: str) -> str:

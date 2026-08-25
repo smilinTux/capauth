@@ -19,6 +19,8 @@ import os
 import re
 import shutil
 import subprocess
+import tarfile
+import tempfile
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -50,6 +52,7 @@ class QuarantineEvidence:
     sha256: str
     verified_at: str
     verified_by: str
+    members: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -257,6 +260,11 @@ def _parse_quarantine(value: object, base: Path, fingerprint: str) -> Optional[Q
     sha256 = str(value.get("sha256") or "").strip().lower()
     verified_at = str(value.get("verified_at") or "").strip()
     verified_by = str(value.get("verified_by") or "").strip()
+    members_raw = value.get("members", [])
+    if not isinstance(members_raw, list) or not all(
+        isinstance(item, str) and item.strip() for item in members_raw
+    ):
+        raise ValueError(f"{fingerprint}: quarantine members must be paths")
     if not archive or not re.fullmatch(r"[0-9a-f]{64}", sha256):
         raise ValueError(f"{fingerprint}: quarantine requires archive and SHA-256")
     if not verified_at or not verified_by:
@@ -266,6 +274,109 @@ def _parse_quarantine(value: object, base: Path, fingerprint: str) -> Optional[Q
         sha256=sha256,
         verified_at=verified_at,
         verified_by=verified_by,
+        members=tuple(sorted(members_raw)),
+    )
+
+
+def quarantine_archive_metadata(
+    evidence: QuarantineEvidence, *, passphrase_file: Optional[Path] = None
+) -> EstateFinding:
+    """Verify a declared tar.gpg envelope and exact member list read-only."""
+    archive = evidence.archive
+    if not archive.is_file() or archive.suffix.lower() != ".gpg":
+        return EstateFinding(
+            "quarantine_decryptability",
+            EstateStatus.FAIL,
+            f"quarantine archive unavailable or not .gpg: {archive}",
+            path=str(archive),
+        )
+    if not _looks_encrypted_openpgp(archive):
+        return EstateFinding(
+            "quarantine_decryptability",
+            EstateStatus.FAIL,
+            f"quarantine archive is not encrypted OpenPGP: {archive}",
+            path=str(archive),
+        )
+    if _sha256_file(archive) != evidence.sha256:
+        return EstateFinding(
+            "quarantine_decryptability",
+            EstateStatus.FAIL,
+            f"quarantine archive SHA-256 mismatch: {archive}",
+            path=str(archive),
+        )
+    if not evidence.members:
+        return EstateFinding(
+            "quarantine_members",
+            EstateStatus.WARN,
+            "quarantine archive has no declared member list",
+            "record exact members after a verified decrypt-and-list ceremony.",
+            path=str(archive),
+        )
+    if passphrase_file is None:
+        return EstateFinding(
+            "quarantine_decryptability",
+            EstateStatus.WARN,
+            "archive envelope and hash verified; decrypt passphrase file not supplied",
+            "supply an approved passphrase-file path for the bounded decrypt check.",
+            path=str(archive),
+        )
+    if (
+        not passphrase_file.is_file()
+        or passphrase_file.is_symlink()
+        or passphrase_file.stat().st_mode & 0o777 != 0o600
+    ):
+        return EstateFinding(
+            "quarantine_decryptability",
+            EstateStatus.FAIL,
+            f"passphrase file unavailable or insecure: {passphrase_file}",
+            path=str(passphrase_file),
+        )
+    try:
+        with tempfile.NamedTemporaryFile(
+            prefix="capauth-quarantine-", suffix=".tar", mode="w+b"
+        ) as output:
+            command = [
+                "gpg",
+                "--batch",
+                "--quiet",
+                "--passphrase-file",
+                str(passphrase_file),
+                "--decrypt",
+                str(archive),
+            ]
+            result = subprocess.run(command, stdout=output, stderr=subprocess.PIPE, check=False)
+            if result.returncode != 0:
+                return EstateFinding(
+                    "quarantine_decryptability",
+                    EstateStatus.FAIL,
+                    "quarantine archive decryption failed",
+                    "verify the approved passphrase file and archive custody.",
+                    path=str(archive),
+                )
+            output.flush()
+            output.seek(0)
+            with tarfile.open(fileobj=output, mode="r:") as tar:
+                actual = tuple(sorted(member.name for member in tar.getmembers()))
+    except (OSError, tarfile.TarError):
+        return EstateFinding(
+            "quarantine_decryptability",
+            EstateStatus.FAIL,
+            "decrypted quarantine is not a readable tar archive",
+            path=str(archive),
+        )
+    if actual != evidence.members:
+        return EstateFinding(
+            "quarantine_members",
+            EstateStatus.FAIL,
+            "decrypted quarantine members do not match the declared list",
+            "treat the archive as custody drift and reverify the exact member set.",
+            path=str(archive),
+        )
+    return EstateFinding(
+        "quarantine_decryptability",
+        EstateStatus.OK,
+        f"encrypted archive decrypted and matched {len(actual)} declared members",
+        path=str(archive),
     )
 
 
@@ -827,6 +938,7 @@ def audit_estate(
     explicit_roots: Iterable[Path] = (),
     syncthing_configs: Iterable[tuple[Path, Path]] = (),
     include_gpg: bool = True,
+    passphrase_file: Optional[Path] = None,
 ) -> EstateReport:
     """Run the complete read-only identity-estate audit."""
     manifest = EstateManifest.load(manifest_path)
@@ -853,6 +965,12 @@ def audit_estate(
     for policy in manifest.identities.values():
         if policy.status == "retired":
             findings.append(_quarantine_finding(policy))
+            if policy.quarantine is not None and (
+                policy.quarantine.members or passphrase_file is not None
+            ):
+                findings.append(
+                    quarantine_archive_metadata(policy.quarantine, passphrase_file=passphrase_file)
+                )
     return EstateReport(manifest=manifest, roots=roots, findings=findings)
 
 

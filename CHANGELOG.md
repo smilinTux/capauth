@@ -6,6 +6,10 @@ All notable changes to `capauth` are documented here. The format is based on
 
 ## [Unreleased]
 
+- Make the Nextcloud custody check explicitly optional for PGP-only
+  installations while preserving required-key and permission failures (card
+  `8e86d22a`).
+
 - Prevent forced-standalone and absent-integration schedule cleanup from
   resolving or calling the SKCapstone scheduler. Integrated sandbox cleanup
   remains idempotent (card `51f6507b`).

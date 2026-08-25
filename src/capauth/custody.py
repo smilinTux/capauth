@@ -123,6 +123,7 @@ class CustodyPaths:
           * ``CAPAUTH_BACKUP_DIR``       backup root
           * ``CAPAUTH_REVOCATION_CERT``  root revocation certificate path
           * ``CAPAUTH_NEXTCLOUD_KEY``    Nextcloud code-signing key path
+          * ``CAPAUTH_REQUIRE_NEXTCLOUD_SIGNING_KEY``  ``true`` or ``false``
           * ``CAPAUTH_EXPECTED_ROOT_FP`` fingerprint this home is expected to hold
         """
         base = resolve_capauth_home(home)
@@ -780,7 +781,19 @@ def check_backup_restorable(live_public_key: Path, backup_root: Path) -> CheckRe
     )
 
 
-def check_nextcloud_signing_key(nextcloud_key: Path) -> CheckResult:
+def nextcloud_signing_key_required(required: Optional[bool] = None) -> bool:
+    """Resolve the explicit Nextcloud custody policy, failing closed on drift."""
+    if required is not None:
+        return required
+    raw = os.environ.get("CAPAUTH_REQUIRE_NEXTCLOUD_SIGNING_KEY", "true").strip().lower()
+    if raw in {"1", "true", "yes", "on"}:
+        return True
+    if raw in {"0", "false", "no", "off"}:
+        return False
+    raise ValueError("CAPAUTH_REQUIRE_NEXTCLOUD_SIGNING_KEY must be true or false")
+
+
+def check_nextcloud_signing_key(nextcloud_key: Path, *, required: bool = True) -> CheckResult:
     """The Nextcloud code-signing key is present with safe perms.
 
     This is the exact failure mode of commit ``456cb3a`` (key never stored,
@@ -788,6 +801,13 @@ def check_nextcloud_signing_key(nextcloud_key: Path) -> CheckResult:
     material is never read.
     """
     if not nextcloud_key.exists():
+        if not required:
+            return CheckResult(
+                "nextcloud_signing_key",
+                Status.WARN,
+                "Nextcloud signing key is not applicable because the integration is disabled",
+                "set CAPAUTH_REQUIRE_NEXTCLOUD_SIGNING_KEY=true when publishing the Nextcloud app",
+            )
         return CheckResult(
             "nextcloud_signing_key",
             Status.FAIL,
@@ -820,6 +840,7 @@ def run_custody_checks(
     *,
     paths: Optional[CustodyPaths] = None,
     max_backup_age_days: int = DEFAULT_MAX_BACKUP_AGE_DAYS,
+    require_nextcloud_signing_key: Optional[bool] = None,
 ) -> list[CheckResult]:
     """Run every custody check and return the ordered results.
 
@@ -830,6 +851,18 @@ def run_custody_checks(
     """
     p = paths or CustodyPaths.resolve(home)
     custody = load_custody_declaration(p.identity_dir)
+    try:
+        nextcloud_required = nextcloud_signing_key_required(require_nextcloud_signing_key)
+        nextcloud_result = check_nextcloud_signing_key(
+            p.nextcloud_key, required=nextcloud_required
+        )
+    except ValueError as exc:
+        nextcloud_result = CheckResult(
+            "nextcloud_signing_key",
+            Status.FAIL,
+            str(exc),
+            "set CAPAUTH_REQUIRE_NEXTCLOUD_SIGNING_KEY to true or false",
+        )
     return [
         check_identity_present(
             p.private_key, p.public_key, p.profile, p.expected_fingerprint, custody
@@ -841,7 +874,7 @@ def run_custody_checks(
         check_keystore_integrity(p.keystore),
         check_backups_configured(p.backup_root, max_backup_age_days),
         check_backup_restorable(p.public_key, p.backup_root),
-        check_nextcloud_signing_key(p.nextcloud_key),
+        nextcloud_result,
     ]
 
 

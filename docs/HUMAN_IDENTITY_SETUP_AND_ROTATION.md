@@ -58,6 +58,19 @@ capauth --home "$HOME/.chef-cauth-setup" doctor custody --json
 `doctor` will remain red until a matching revocation certificate and backup
 exist. A red custody gate is not waived.
 
+For a PGP-only installation that does not publish the Nextcloud app, explicitly
+disable that integration check. The default remains required and invalid values
+fail closed:
+
+```bash
+CAPAUTH_REQUIRE_NEXTCLOUD_SIGNING_KEY=false \
+  capauth --home "$HOME/.chef-cauth-setup" doctor custody --json
+```
+
+The report marks a missing optional key as `WARN` and still fails on unsafe
+permissions when a key is present. Use `--require-nextcloud-signing-key` or
+the environment value `true` for installations that publish Nextcloud.
+
 ## 4. Revocation certificate and custody copies
 
 The human imports the staged key into an isolated temporary GnuPG home and

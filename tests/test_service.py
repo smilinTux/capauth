@@ -189,6 +189,14 @@ class TestServiceEndpoints:
         assert "capauth_pgp" in data["token_endpoint_auth_methods_supported"]
         assert "openid" in data["scopes_supported"]
 
+    def test_oidc_discovery_prefers_explicit_issuer(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Root discovery must not fall back to the placeholder service identity."""
+        monkeypatch.delenv("CAPAUTH_BASE_URL", raising=False)
+        monkeypatch.setenv("CAPAUTH_OIDC_ISSUER", "https://10.0.0.139:8420")
+        response = self.client.get("/.well-known/openid-configuration")
+        assert response.status_code == 200
+        assert response.json()["issuer"] == "https://10.0.0.139:8420"
+
     def test_packaged_bunker_assets_are_served(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:

@@ -47,3 +47,24 @@ fail closed and all unrelated OIDC behavior retains its existing configuration.
 No DNS, certificate, deployment, configuration, restart, key operation,
 protected-data access, provider traffic, or external action occurred in this
 source slice.
+
+## Source qualification results
+
+- Focused WebAuthn and OIDC tests: 42 passed.
+- Parent sensitivity controls: the untouched parent accepted the IP issuer and
+  still wired passkeys to `CAPAUTH_DATA_DIR`; both controls failed as expected.
+- Candidate sensitivity controls: the IP issuer is unavailable and the
+  passkey-only environment seam is present; both controls passed.
+- Installed-candidate full suite: 1309 passed and 90 skipped in an isolated
+  scheduler home. No test was retried or skipped by this card.
+- Exact CI lint scope: all 182 source and test files formatted, source lint
+  passed, and `git diff --check` passed.
+- Package build and Twine checks: passed.
+
+An earlier ambient editable-suite attempt produced four environment failures:
+an intentionally set `CAPAUTH_HOME` contradicted two resolver tests, the shared
+editable distribution reported version 0.3.1, and the already-carded standalone
+schedule-unregister defect reached the optional SKCapstone integration. The
+authoritative installed-candidate rerun corrected the test isolation and passed
+all 1309 collected tests. Repository-wide `ruff check src tests` also reports 59
+inherited test-only violations outside the CI lint scope and outside this card.

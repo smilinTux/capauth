@@ -8,9 +8,9 @@ passkey then mints the SAME OIDC identity (``sub`` = fingerprint) but with
 tier was used. This keeps the sovereign PGP credential as the root of trust and
 the passkey as an additive, phishing-resistant easy-mode.
 
-Credentials are persisted (``passkeys.json``) keyed by credential id; the
+Credentials are persisted (``passkeys.json``) keyed by credential ID; the
 WebAuthn challenges (registration tickets + login challenges) live in memory and
-expire. The RP id / origin derive from the IdP issuer.
+expire. The exact origin and explicit named RP ID are validated before use.
 """
 
 from __future__ import annotations

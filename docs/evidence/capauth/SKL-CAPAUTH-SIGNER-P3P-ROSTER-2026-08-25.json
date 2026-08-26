@@ -1,0 +1,605 @@
+{
+  "schema_version": "skcapstone-application-identity-roster/v1",
+  "card_id": "1e8931ae",
+  "generated_at": "2026-08-26T11:48:07Z",
+  "environment": "qualification",
+  "status": "metadata_complete_activation_blocked",
+  "governance_owner": "casey",
+  "bounded_operator": "jarvis",
+  "manifest_hash": {
+    "algorithm": "sha256",
+    "publication": "cardstore-link",
+    "value": null,
+    "note": "The artifact cannot contain its own byte hash. The exact SHA-256 is published on card 1e8931ae and in the separate mutation envelope."
+  },
+  "sources": {
+    "boundary_derivation": {
+      "repository": "sk-standards",
+      "commit": "ba9c2212c5f9bdd5662e80081b00b6ec874c5243",
+      "path": "proposals/APPLICATION_IDENTITY_ARCHITECTURE_REVIEW.md",
+      "sha256": "2dd68fb7f5d4aa880aa1aad1979e444b4769fd582a0ddd0796ec5f71d11164ee"
+    },
+    "application_identity_blueprint": {
+      "repository": "sk-standards",
+      "commit": "ba9c2212c5f9bdd5662e80081b00b6ec874c5243",
+      "path": "proposals/APPLICATION_IDENTITY_AND_CAPAUTH_KEY_MANAGEMENT_BLUEPRINT.md",
+      "sha256": "55cdae2c5d5b4ae1563669c2476d25ededc953140297dcaf632ea1a8a9879d0b"
+    },
+    "sklegal_issuer_policy": {
+      "repository": "sklegal",
+      "commit": "d74aa99de4a2116447301b76255618cb12df16b9",
+      "path": "deploy/chiap01/issuer-policy/trusted-issuers.json",
+      "sha256": "cb7161dba028ece024bafc77eea39f1b580ceb256239909ef7a0f06a5829afcd",
+      "detached_signature_sha256": "a1db46980f479a4780ddfa2462defc15174255e2f934fb0b7540dfa6d1696d20",
+      "governance_signer_fingerprint": "AD80D077A047BABF29EEC97AF454FDBC3B1C37D9",
+      "policy_version": "sklegal-authz/v1"
+    },
+    "capability_ceiling_implementation": {
+      "repository": "capauth",
+      "commit": "fa829b4f2583aeb9669fc6458a203ef513d876c7",
+      "path": "src/capauth/identity_class.py",
+      "sha256": "f4f4599f06dcc355589802dcdc9cd29f6ea0cc460e2a203bf4643dfb0e3eed60",
+      "merged_change": "c1d836a5",
+      "state": "service_and_connector_ceiling_classes_merged_fail_closed"
+    },
+    "skdashboard_public_profile": {
+      "profile_id": "efc323df-790f-4f9d-9b1d-c6ce9419feca",
+      "public_key_sha256": "3fcd748c73599aacee6ab3255b272a8f0df3db934b6e8bd8a9a95e98c7338997",
+      "profile_signature_state": "valid",
+      "review_evidence_card": "676fbf52"
+    }
+  },
+  "roster_summary": {
+    "logical_identity_count": 8,
+    "sklegal_logical_identity_count": 7,
+    "application_registration_count": 2,
+    "durable_credential_count_today": 2,
+    "keyless_or_no_key_count_today": 6,
+    "conditional_future_durable_credentials": [
+      {
+        "identity_id": "sklegal.qual.connector-workload",
+        "trigger": "human-approved external dispatch enablement"
+      }
+    ],
+    "excluded_conditional_candidate": {
+      "candidate": "skgateway",
+      "reason": "No current decision makes the gateway a self-authenticating service with independent custody."
+    }
+  },
+  "global_constraints": {
+    "max_delegated_ttl_seconds": 3600,
+    "max_delegation_depth": 2,
+    "new_subject_without_registered_ceiling": "deny",
+    "private_material_in_manifest": "forbidden",
+    "literal_custody_paths_in_manifest": "forbidden",
+    "credential_reference_semantics": "Opaque metadata handles only. A handle grants no access and must be bound by a separately approved custody operation before activation.",
+    "default_failover": "none",
+    "legacy_agent_signer_as_application_authority": "forbidden"
+  },
+  "identities": [
+    {
+      "identity_id": "sklegal.qual.application-authority",
+      "canonical_fqid": "sklegal@casey.skworld.io",
+      "subject_state": "proposed_unenrolled",
+      "identity_class": "service",
+      "credential_mode": "durable_application_issuer",
+      "owner": "platform",
+      "governance_owner": "casey",
+      "revocation_owner": "casey",
+      "audiences": [
+        "sklegal.api",
+        "sklegal.connector",
+        "sklegal.model",
+        "sklegal.tool"
+      ],
+      "purposes": [
+        "bounded_application_issuance",
+        "workload_registry_anchor"
+      ],
+      "scope_ceiling": {
+        "policy_version": "sklegal-authz/v1",
+        "capabilities": [
+          "action.calendar.dispatch",
+          "action.calendar.prepare",
+          "action.email.dispatch",
+          "action.email.prepare",
+          "action.filing.dispatch",
+          "action.filing.prepare",
+          "action.service.dispatch",
+          "action.service.prepare",
+          "audit.read",
+          "claim.propose",
+          "claim.review",
+          "client.manage",
+          "client.read",
+          "corpus.artifact.read",
+          "corpus.ingest.submit",
+          "corpus.search",
+          "evidence.manage",
+          "evidence.read",
+          "matter.conflict.review",
+          "matter.manage",
+          "matter.read",
+          "matter.wall.manage",
+          "tenant.admin",
+          "tenant.read",
+          "work_product.approve",
+          "work_product.draft"
+        ],
+        "forbidden_by_class": [
+          "*",
+          "token:issue",
+          "identity:sign",
+          "action.email.dispatch",
+          "action.filing.dispatch",
+          "action.calendar.dispatch",
+          "action.service.dispatch"
+        ],
+        "note": "The listed policy capabilities are the issuer ceiling, not grants to the issuer process. Every issued grant remains bound to one audience, principal kind, purpose, tenant, resource, and expiry."
+      },
+      "ttl": {
+        "credential_expires_at": null,
+        "credential_expiry_state": "no_expiry_recorded",
+        "issued_authority_max_seconds": 3600
+      },
+      "public_fingerprint": "B29C695D1C8429A49189D2A667A6405DE2C1BFEB",
+      "credential_reference": "capauth-custody:sklegal-qualification:application-issuer:primary",
+      "credential_reference_state": "opaque_metadata_handle_unbound",
+      "custody_host": "chiap08",
+      "runtime_host": "chiap01",
+      "durable_credential_justification": [
+        "Q1: SKLegal issuance must be independently revocable without revoking SKDashboard or SKGateway.",
+        "Q5: the application issuer must remain an explicit availability and recovery boundary."
+      ],
+      "failover": {
+        "mode": "none",
+        "approved_secondary_identity_ids": [],
+        "same_or_narrower": true,
+        "proposed_recovery_time_objective_seconds": 14400,
+        "recovery_time_objective_state": "pending_human_attestation"
+      },
+      "activation_state": "blocked_pending_human_roster_attestation_and_independent_issuer_review"
+    },
+    {
+      "identity_id": "sklegal.qual.api-workload",
+      "canonical_fqid": "sklegal-api@casey.skworld.io",
+      "subject_state": "proposed_unenrolled",
+      "identity_class": "service",
+      "credential_mode": "keyless_delegated",
+      "owner": "platform",
+      "governance_owner": "casey",
+      "revocation_owner": "casey",
+      "audiences": [
+        "sklegal.api"
+      ],
+      "purposes": [
+        "tenant_administration",
+        "client_service",
+        "matter_management",
+        "conflict_review",
+        "information_barrier_admin",
+        "evidence_review",
+        "legal_research",
+        "isolated_quarantine_review",
+        "corpus_ingestion",
+        "claim_development",
+        "claim_review",
+        "work_product_preparation",
+        "external_action_preparation"
+      ],
+      "scope_ceiling": {
+        "capabilities": [
+          "action.calendar.prepare",
+          "action.email.prepare",
+          "action.filing.prepare",
+          "action.service.prepare",
+          "claim.propose",
+          "claim.review",
+          "client.manage",
+          "client.read",
+          "corpus.artifact.read",
+          "corpus.ingest.submit",
+          "corpus.search",
+          "evidence.manage",
+          "evidence.read",
+          "matter.conflict.review",
+          "matter.manage",
+          "matter.read",
+          "matter.wall.manage",
+          "tenant.read",
+          "work_product.draft"
+        ],
+        "forbidden_by_class": [
+          "*",
+          "token:issue",
+          "identity:sign",
+          "action.email.dispatch",
+          "action.filing.dispatch",
+          "action.calendar.dispatch",
+          "action.service.dispatch"
+        ]
+      },
+      "ttl": {
+        "credential_expires_at": null,
+        "credential_expiry_state": "keyless",
+        "delegated_authority_max_seconds": 3600
+      },
+      "public_fingerprint": null,
+      "credential_reference": null,
+      "credential_metadata_state": "not_applicable_keyless",
+      "durable_credential_justification": [],
+      "failover": {
+        "mode": "inherits_application_authority_recovery",
+        "approved_secondary_identity_ids": [],
+        "same_or_narrower": true,
+        "recovery_time_objective_seconds": 14400
+      },
+      "activation_state": "blocked_pending_human_roster_attestation"
+    },
+    {
+      "identity_id": "sklegal.qual.model-workload",
+      "canonical_fqid": "sklegal-model@casey.skworld.io",
+      "subject_state": "proposed_unenrolled",
+      "identity_class": "service",
+      "credential_mode": "keyless_delegated",
+      "owner": "platform",
+      "governance_owner": "casey",
+      "revocation_owner": "casey",
+      "audiences": [
+        "sklegal.model"
+      ],
+      "purposes": [
+        "evidence_review",
+        "legal_research",
+        "isolated_quarantine_review",
+        "claim_development",
+        "claim_review",
+        "work_product_preparation"
+      ],
+      "scope_ceiling": {
+        "capabilities": [
+          "claim.propose",
+          "claim.review",
+          "corpus.artifact.read",
+          "corpus.search",
+          "evidence.read",
+          "work_product.draft"
+        ],
+        "required_constraints": [
+          "tenant",
+          "matter",
+          "purpose",
+          "model_route",
+          "workflow_run",
+          "expiry"
+        ],
+        "forbidden_by_class": [
+          "*",
+          "token:issue",
+          "identity:sign",
+          "action.email.dispatch",
+          "action.filing.dispatch",
+          "action.calendar.dispatch",
+          "action.service.dispatch"
+        ]
+      },
+      "ttl": {
+        "credential_expires_at": null,
+        "credential_expiry_state": "keyless",
+        "delegated_authority_max_seconds": 3600
+      },
+      "public_fingerprint": null,
+      "credential_reference": null,
+      "credential_metadata_state": "not_applicable_keyless",
+      "durable_credential_justification": [],
+      "failover": {
+        "mode": "inherits_application_authority_recovery",
+        "approved_secondary_identity_ids": [],
+        "same_or_narrower": true,
+        "recovery_time_objective_seconds": 14400
+      },
+      "activation_state": "blocked_pending_human_roster_attestation"
+    },
+    {
+      "identity_id": "sklegal.qual.tool-workload",
+      "canonical_fqid": "sklegal-tool@casey.skworld.io",
+      "subject_state": "proposed_unenrolled",
+      "identity_class": "service",
+      "credential_mode": "keyless_delegated",
+      "owner": "platform",
+      "governance_owner": "casey",
+      "revocation_owner": "casey",
+      "audiences": [
+        "sklegal.tool"
+      ],
+      "purposes": [
+        "matter_management",
+        "evidence_review",
+        "legal_research",
+        "work_product_preparation"
+      ],
+      "scope_ceiling": {
+        "capabilities": [
+          "corpus.search",
+          "evidence.read",
+          "matter.read",
+          "work_product.draft"
+        ],
+        "required_constraints": [
+          "typed_tool_contract",
+          "tenant",
+          "matter",
+          "purpose",
+          "workflow_run",
+          "expiry",
+          "argument_validation",
+          "result_validation"
+        ],
+        "forbidden_by_class": [
+          "*",
+          "token:issue",
+          "identity:sign",
+          "action.email.dispatch",
+          "action.filing.dispatch",
+          "action.calendar.dispatch",
+          "action.service.dispatch"
+        ]
+      },
+      "ttl": {
+        "credential_expires_at": null,
+        "credential_expiry_state": "keyless",
+        "delegated_authority_max_seconds": 3600
+      },
+      "public_fingerprint": null,
+      "credential_reference": null,
+      "credential_metadata_state": "not_applicable_keyless",
+      "durable_credential_justification": [],
+      "failover": {
+        "mode": "inherits_application_authority_recovery",
+        "approved_secondary_identity_ids": [],
+        "same_or_narrower": true,
+        "recovery_time_objective_seconds": 14400
+      },
+      "activation_state": "blocked_pending_human_roster_attestation"
+    },
+    {
+      "identity_id": "sklegal.qual.connector-workload",
+      "canonical_fqid": "sklegal-connector@casey.skworld.io",
+      "subject_state": "proposed_unenrolled",
+      "identity_class": "connector",
+      "credential_mode": "keyless_disabled_until_dispatch_approval",
+      "owner": "platform",
+      "governance_owner": "casey",
+      "revocation_owner": "casey",
+      "audiences": [
+        "sklegal.connector"
+      ],
+      "purposes": [
+        "external_action_dispatch"
+      ],
+      "scope_ceiling": {
+        "capabilities": [
+          "action.calendar.dispatch",
+          "action.email.dispatch",
+          "action.filing.dispatch",
+          "action.service.dispatch"
+        ],
+        "required_constraints": [
+          "exact_approved_artifact_id",
+          "exact_approved_artifact_version",
+          "exact_approved_artifact_sha256",
+          "tenant",
+          "matter",
+          "purpose",
+          "workflow_run",
+          "expiry",
+          "approval",
+          "receipt"
+        ],
+        "forbidden_by_class": [
+          "*",
+          "token:issue",
+          "identity:sign"
+        ]
+      },
+      "ttl": {
+        "credential_expires_at": null,
+        "credential_expiry_state": "keyless_and_disabled",
+        "delegated_authority_max_seconds": 3600
+      },
+      "public_fingerprint": null,
+      "credential_reference": null,
+      "credential_metadata_state": "not_applicable_until_separate_dispatch_issuer_is_human_approved",
+      "durable_credential_justification": [],
+      "future_durable_trigger": "External dispatch is enabled by an exact human approval; at that time Q2 becomes active and a separately reviewed durable issuer is required.",
+      "failover": {
+        "mode": "none",
+        "approved_secondary_identity_ids": [],
+        "same_or_narrower": true,
+        "recovery_time_objective_seconds": null,
+        "recovery_time_objective_state": "not_applicable_while_disabled"
+      },
+      "activation_state": "disabled"
+    },
+    {
+      "identity_id": "sklegal.qual.context-broker",
+      "canonical_fqid": "sklegal-context-broker@casey.skworld.io",
+      "subject_state": "proposed_unenrolled",
+      "identity_class": "service",
+      "credential_mode": "keyless_delegated_database_lease_broker",
+      "owner": "platform",
+      "governance_owner": "casey",
+      "revocation_owner": "casey",
+      "audiences": [
+        "internal:postgres-context-lease"
+      ],
+      "purposes": [
+        "mint_one_use_database_context_lease"
+      ],
+      "scope_ceiling": {
+        "registry_local_scope_labels": [
+          "database.context-lease.mint"
+        ],
+        "constraints": [
+          "one_tenant",
+          "one_principal",
+          "one_purpose",
+          "one_use",
+          "no_application_table_access"
+        ],
+        "forbidden_by_class": [
+          "*",
+          "token:issue",
+          "identity:sign",
+          "action.email.dispatch",
+          "action.filing.dispatch",
+          "action.calendar.dispatch",
+          "action.service.dispatch"
+        ]
+      },
+      "ttl": {
+        "credential_expires_at": null,
+        "credential_expiry_state": "keyless",
+        "delegated_authority_max_seconds": 3600,
+        "database_lease_ttl": "one_use_and_short_lived"
+      },
+      "public_fingerprint": null,
+      "credential_reference": null,
+      "credential_metadata_state": "not_applicable_keyless",
+      "durable_credential_justification": [],
+      "failover": {
+        "mode": "inherits_application_authority_recovery",
+        "approved_secondary_identity_ids": [],
+        "same_or_narrower": true,
+        "recovery_time_objective_seconds": 14400
+      },
+      "activation_state": "blocked_pending_human_roster_attestation"
+    },
+    {
+      "identity_id": "sklegal.qual.runtime-pool",
+      "canonical_fqid": "sklegal-runtime@casey.skworld.io",
+      "subject_state": "logical_identity_never_key_bearing",
+      "identity_class": "service",
+      "credential_mode": "no_signing_key_database_lease_consumer",
+      "owner": "platform",
+      "governance_owner": "casey",
+      "revocation_owner": "casey",
+      "audiences": [
+        "internal:postgres-context-lease"
+      ],
+      "purposes": [
+        "consume_one_use_database_context_lease"
+      ],
+      "scope_ceiling": {
+        "registry_local_scope_labels": [
+          "database.context-lease.consume"
+        ],
+        "constraints": [
+          "one_use",
+          "cannot_choose_principal",
+          "cannot_mint_lease",
+          "no_signing_key"
+        ],
+        "forbidden_by_class": [
+          "*",
+          "token:issue",
+          "identity:sign",
+          "action.email.dispatch",
+          "action.filing.dispatch",
+          "action.calendar.dispatch",
+          "action.service.dispatch"
+        ]
+      },
+      "ttl": {
+        "credential_expires_at": null,
+        "credential_expiry_state": "no_credential",
+        "authorization_context_max_seconds": 3600,
+        "database_lease_ttl": "one_use_and_short_lived"
+      },
+      "public_fingerprint": null,
+      "credential_reference": null,
+      "credential_metadata_state": "not_applicable_no_key",
+      "durable_credential_justification": [],
+      "failover": {
+        "mode": "stateless_pool_replacement",
+        "approved_secondary_identity_ids": [],
+        "same_or_narrower": true,
+        "recovery_time_objective_seconds": 14400
+      },
+      "activation_state": "blocked_pending_human_roster_attestation"
+    },
+    {
+      "identity_id": "skdashboard.qual.registration",
+      "canonical_fqid": "skdashboard-read-only@casey.skworld.io",
+      "subject_state": "proposed_unenrolled",
+      "identity_class": "service",
+      "credential_mode": "durable_oidc_or_workload_credential",
+      "owner": "platform",
+      "governance_owner": "casey",
+      "revocation_owner": "casey",
+      "audiences": [
+        "skdashboard.read"
+      ],
+      "purposes": [
+        "dashboard-read"
+      ],
+      "scope_ceiling": {
+        "capabilities": [
+          "skdashboard.read"
+        ],
+        "forbidden_by_class": [
+          "*",
+          "token:issue",
+          "identity:sign",
+          "action.email.dispatch",
+          "action.filing.dispatch",
+          "action.calendar.dispatch",
+          "action.service.dispatch"
+        ],
+        "read_only": true
+      },
+      "ttl": {
+        "credential_expires_at": null,
+        "credential_expiry_state": "no_expiry_recorded",
+        "audience_token_max_seconds": 3600
+      },
+      "public_fingerprint": "DCE38ED7BC9D95D724B5FE7FECF9D6A423EC83F5",
+      "public_key_sha256": "3fcd748c73599aacee6ab3255b272a8f0df3db934b6e8bd8a9a95e98c7338997",
+      "profile_id": "efc323df-790f-4f9d-9b1d-c6ce9419feca",
+      "credential_reference": "capauth-custody:skdashboard-read-only:primary",
+      "credential_reference_state": "opaque_metadata_handle_unbound",
+      "custody_host": "chiap08",
+      "durable_credential_justification": [
+        "Q1: SKDashboard must be independently revocable without revoking SKLegal.",
+        "Q3: SKDashboard uses a separate product and custody boundary."
+      ],
+      "failover": {
+        "mode": "none",
+        "approved_secondary_identity_ids": [],
+        "same_or_narrower": true,
+        "proposed_recovery_time_objective_seconds": 14400,
+        "recovery_time_objective_state": "pending_human_attestation"
+      },
+      "activation_state": "blocked_pending_human_roster_attestation_and_post_generation_enrollment_review"
+    }
+  ],
+  "legacy_non_roster_credentials": [
+    {
+      "fingerprint": "C8D406A46F2DF4894E4FB41580A638570C9D41C4",
+      "classification": "legacy_agent_signer",
+      "roster_membership": false,
+      "permitted_as_sklegal_application_authority": false,
+      "disposition": "preserve_for_separately_governed_migration_and_revocation; never silently reclassify"
+    }
+  ],
+  "human_attestation_required": {
+    "card_id": "34ac09c6",
+    "required_decisions": [
+      "Approve or reject the eight boundary-derived logical records.",
+      "Approve or replace the proposed canonical fqids.",
+      "Approve or replace the four-hour recovery-time objective for the two durable credentials.",
+      "Confirm failover none for both durable credentials.",
+      "Approve or reject the two opaque credential-reference handles before they are bound by any runtime or custody operation."
+    ]
+  }
+}

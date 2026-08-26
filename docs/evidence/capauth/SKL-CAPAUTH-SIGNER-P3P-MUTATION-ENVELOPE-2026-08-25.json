@@ -1,0 +1,119 @@
+{
+  "schema_version": "skcapstone-phase3-mutation-envelope/v1",
+  "card_id": "1e8931ae",
+  "generated_at": "2026-08-26T11:48:07Z",
+  "environment": "qualification",
+  "roster_manifest": {
+    "path": "docs/evidence/capauth/SKL-CAPAUTH-SIGNER-P3P-ROSTER-2026-08-25.json",
+    "sha256": "9e43a0c18c003fbd7b2c2bb64aea528e4ae75a442a168b9e763cf78afa65a75a",
+    "status": "metadata_complete_activation_blocked"
+  },
+  "envelope_state": "closed_no_mutation_authorized",
+  "authorized_actions": [],
+  "explicitly_denied_actions": [
+    "private_key_read",
+    "credential_read",
+    "key_generation",
+    "key_export",
+    "key_import",
+    "key_move",
+    "key_copy",
+    "key_rotation",
+    "key_deletion",
+    "key_synchronization",
+    "credential_reference_binding",
+    "identity_enrollment",
+    "identity_activation",
+    "capability_grant",
+    "policy_activation",
+    "service_restart",
+    "deployment",
+    "external_action"
+  ],
+  "unchanged_authority": {
+    "fleet_jarvis_signer": "preserved_unchanged",
+    "legacy_signer_reclassification": "forbidden",
+    "existing_runtime_policy": "preserved_unchanged",
+    "existing_service_state": "preserved_unchanged"
+  },
+  "prerequisites_before_a_later_phase3_mutation_envelope_can_open": [
+    {
+      "gate": "boundary_derived_roster_human_attestation",
+      "card_id": "34ac09c6",
+      "required_receipt": "An attributable human approval bound to the exact roster SHA-256."
+    },
+    {
+      "gate": "dedicated_sklegal_issuer_independent_review",
+      "card_id": "c01d6bd7",
+      "required_receipt": "Independent acceptance of the dedicated issuer custody and signed trusted-issuer policy."
+    },
+    {
+      "gate": "skdashboard_post_generation_enrollment_review",
+      "card_id": "676fbf52",
+      "required_receipt": "Public fingerprint, public-key hash, profile signature, custody boundary, and read-only roster match remain independently verified."
+    },
+    {
+      "gate": "service_and_connector_capability_ceilings",
+      "card_id": "c1d836a5",
+      "required_receipt": "The target runtime is pinned to CapAuth commit fa829b4f2583aeb9669fc6458a203ef513d876c7 or a reviewed descendant before any new service or connector subject is enrolled."
+    },
+    {
+      "gate": "opaque_credential_reference_binding",
+      "required_receipt": "A separate human-approved metadata mutation binds each roster handle to verified custody without exposing a filesystem path or secret."
+    },
+    {
+      "gate": "canonical_subject_enrollment",
+      "required_receipt": "A separate human-approved enrollment mutation binds each approved fqid to the exact public fingerprint and registered capability-ceiling class."
+    },
+    {
+      "gate": "recovery_objective_attestation",
+      "required_receipt": "The human owner approves or replaces the proposed four-hour RTO and failover-none posture for both durable credentials."
+    }
+  ],
+  "candidate_mutations": [
+    {
+      "identity_id": "sklegal.qual.application-authority",
+      "candidate_action": "bind_existing_public_credential_metadata",
+      "public_fingerprint": "B29C695D1C8429A49189D2A667A6405DE2C1BFEB",
+      "credential_reference": "capauth-custody:sklegal-qualification:application-issuer:primary",
+      "target_fqid": "sklegal@casey.skworld.io",
+      "target_ceiling_class": "service",
+      "state": "blocked",
+      "blocking_gates": [
+        "boundary_derived_roster_human_attestation",
+        "dedicated_sklegal_issuer_independent_review",
+        "service_and_connector_capability_ceilings",
+        "opaque_credential_reference_binding",
+        "canonical_subject_enrollment",
+        "recovery_objective_attestation"
+      ]
+    },
+    {
+      "identity_id": "skdashboard.qual.registration",
+      "candidate_action": "bind_existing_public_credential_metadata",
+      "public_fingerprint": "DCE38ED7BC9D95D724B5FE7FECF9D6A423EC83F5",
+      "public_key_sha256": "3fcd748c73599aacee6ab3255b272a8f0df3db934b6e8bd8a9a95e98c7338997",
+      "profile_id": "efc323df-790f-4f9d-9b1d-c6ce9419feca",
+      "credential_reference": "capauth-custody:skdashboard-read-only:primary",
+      "target_fqid": "skdashboard-read-only@casey.skworld.io",
+      "target_ceiling_class": "service",
+      "state": "blocked",
+      "blocking_gates": [
+        "boundary_derived_roster_human_attestation",
+        "skdashboard_post_generation_enrollment_review",
+        "service_and_connector_capability_ceilings",
+        "opaque_credential_reference_binding",
+        "canonical_subject_enrollment",
+        "recovery_objective_attestation"
+      ]
+    }
+  ],
+  "safety_invariants": [
+    "This envelope carries no private material, bearer credential, passphrase, or literal custody path.",
+    "The roster is metadata and grants no authority by itself.",
+    "No keyless workload receives a durable credential through this envelope.",
+    "The connector remains disabled and keyless until a separate human-approved dispatch decision.",
+    "Failover is none; no copied credential is treated as a secondary identity.",
+    "Unknown, unclassified, unbound, stale, unavailable, or unapproved state remains denied."
+  ]
+}

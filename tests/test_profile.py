@@ -111,7 +111,9 @@ class TestInitProfile:
 
         data = json.loads(manifest.read_text(encoding="utf-8"))
         record = next(
-            item for item in data["identities"] if item["fingerprint"] == profile.key_info.fingerprint
+            item
+            for item in data["identities"]
+            if item["fingerprint"] == profile.key_info.fingerprint
         )
         assert record == {
             "allowed_secret_roots": [str(capauth_home.resolve())],

@@ -84,6 +84,23 @@ def main(ctx: click.Context, capauth_home: Optional[str]) -> None:
     default=None,
     help="Enable public identity sync; secret custody remains local.",
 )
+@click.option(
+    "--estate-manifest",
+    type=click.Path(path_type=Path, exists=True, dir_okay=False),
+    default=None,
+    help="Atomically register this new identity in an existing estate manifest.",
+)
+@click.option(
+    "--estate-identity-type",
+    type=click.Choice(["human", "service", "node"], case_sensitive=False),
+    default=None,
+    help="Managed estate classification (required with --estate-manifest).",
+)
+@click.option(
+    "--owning-host",
+    default=None,
+    help="Approved private-key custody host (default: current hostname).",
+)
 @click.pass_context
 def init(
     ctx: click.Context,
@@ -94,6 +111,9 @@ def init(
     algorithm: str,
     backend: str,
     enable_sync: Optional[bool],
+    estate_manifest: Optional[Path],
+    estate_identity_type: Optional[str],
+    owning_host: Optional[str],
 ) -> None:
     """Create your sovereign profile.
 
@@ -105,6 +125,13 @@ def init(
     local.
     """
     from .profile import init_profile
+
+    if estate_manifest is not None and estate_identity_type is None:
+        raise click.UsageError("--estate-identity-type is required with --estate-manifest")
+    if estate_manifest is None and (estate_identity_type is not None or owning_host is not None):
+        raise click.UsageError(
+            "--estate-identity-type and --owning-host require --estate-manifest"
+        )
 
     base = ctx.obj.get("home")
     algo = Algorithm.ED25519 if algorithm == "ed25519" else Algorithm.RSA4096
@@ -121,6 +148,9 @@ def init(
             algorithm=algo,
             backend_type=btype,
             base_dir=base,
+            estate_manifest=estate_manifest,
+            estate_identity_type=estate_identity_type,
+            owning_host=owning_host,
         )
         _render_profile(profile)
         console.print(

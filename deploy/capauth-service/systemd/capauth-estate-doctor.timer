@@ -1,0 +1,12 @@
+# Daily persistent CapAuth estate audit.
+[Unit]
+Description=Schedule CapAuth identity estate audit
+
+[Timer]
+OnCalendar=daily
+RandomizedDelaySec=30m
+Persistent=true
+Unit=capauth-estate-doctor.service
+
+[Install]
+WantedBy=timers.target

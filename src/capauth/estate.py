@@ -13,11 +13,13 @@ verifies, providing a pre-removal gate for the operator's approved change.
 
 from __future__ import annotations
 
+import fcntl
 import hashlib
 import json
 import os
 import re
 import shutil
+import socket
 import subprocess
 import tarfile
 import tempfile
@@ -63,6 +65,7 @@ class IdentityPolicy:
     status: str
     identity_type: str
     label: str = ""
+    owning_host: str = ""
     allowed_secret_roots: tuple[Path, ...] = ()
     quarantine: Optional[QuarantineEvidence] = None
 
@@ -112,11 +115,15 @@ class EstateManifest:
             quarantine = _parse_quarantine(
                 record.get("quarantine"), manifest_path.parent, fingerprint
             )
+            owning_host = str(record.get("owning_host") or "").strip()
+            if owning_host and any(character.isspace() for character in owning_host):
+                raise ValueError(f"{fingerprint}: owning_host must be a hostname")
             identities[fingerprint] = IdentityPolicy(
                 fingerprint=fingerprint,
                 status=status,
                 identity_type=identity_type,
                 label=str(record.get("label") or "").strip(),
+                owning_host=owning_host,
                 allowed_secret_roots=roots,
                 quarantine=quarantine,
             )
@@ -223,6 +230,63 @@ def _manifest_path(value: str, base: Path) -> Path:
     if not path.is_absolute():
         path = base / path
     return path.resolve(strict=False)
+
+
+def manifest_active_identity(
+    manifest_path: Path,
+    *,
+    fingerprint: str,
+    identity_type: str,
+    label: str,
+    owning_host: str,
+    allowed_secret_root: Path,
+) -> None:
+    """Atomically register a newly created identity in an existing estate.
+
+    The sidecar lock serializes creators. The manifest is parsed and validated
+    both before and after the serializer produces replacement bytes.
+    """
+    path = Path(manifest_path).expanduser()
+    host = owning_host.strip()
+    if not host or any(character.isspace() for character in host):
+        raise ValueError("owning_host must be a non-empty hostname")
+    normalized_type = identity_type.strip().lower()
+    if normalized_type not in IDENTITY_TYPES:
+        raise ValueError("identity_type must be human, service, or node")
+    normalized_fingerprint = _normalize_fingerprint(fingerprint)
+    lock_path = path.with_name(f".{path.name}.lock")
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    with lock_path.open("a+b") as lock:
+        fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
+        raw = path.read_bytes()
+        data = json.loads(raw.decode("utf-8"))
+        EstateManifest.load(path)
+        records = data["identities"]
+        if any(
+            _normalize_fingerprint(record.get("fingerprint")) == normalized_fingerprint
+            for record in records
+        ):
+            raise ValueError(f"fingerprint already manifested: {normalized_fingerprint}")
+        records.append(
+            {
+                "fingerprint": normalized_fingerprint,
+                "status": "active",
+                "identity_type": normalized_type,
+                "label": label.strip(),
+                "owning_host": host,
+                "allowed_secret_roots": [str(Path(allowed_secret_root).expanduser().resolve())],
+            }
+        )
+        replacement = json.dumps(data, indent=2, sort_keys=True).encode("utf-8") + b"\n"
+        json.loads(replacement.decode("utf-8"))
+        temporary = path.with_name(f".{path.name}.{os.getpid()}.tmp")
+        try:
+            temporary.write_bytes(replacement)
+            os.chmod(temporary, path.stat().st_mode & 0o777)
+            os.replace(temporary, path)
+        finally:
+            temporary.unlink(missing_ok=True)
+        EstateManifest.load(path)
 
 
 def _sha256_file(path: Path) -> str:
@@ -857,7 +921,23 @@ def classify_artifacts(
                 artifact.path is not None and _is_within(artifact.path, root)
                 for root in policy.allowed_secret_roots
             )
-            if not policy.allowed_secret_roots:
+            current_host = socket.gethostname().split(".", 1)[0].lower()
+            owning_host = policy.owning_host.split(".", 1)[0].lower()
+            if owning_host and current_host != owning_host:
+                findings.append(
+                    EstateFinding(
+                        "secret_host_placement",
+                        EstateStatus.FAIL,
+                        f"active {policy.identity_type} secret key {artifact.fingerprint} is "
+                        f"on host {current_host}, but its owning host is {policy.owning_host}",
+                        "quarantine the misplaced copy or correct the approved owning_host.",
+                        fingerprint=artifact.fingerprint,
+                        path=path_text,
+                        classification="active-misplaced",
+                        identity_type=policy.identity_type,
+                    )
+                )
+            elif not policy.allowed_secret_roots:
                 findings.append(
                     EstateFinding(
                         "secret_placement",

@@ -1819,6 +1819,72 @@ def pqc_report_cmd(output_format: str, static: bool) -> None:
         click.echo(format_project_report(rpt))
 
 
+@main.group("passphrase")
+def passphrase() -> None:
+    """Rotate private-key and custody-bundle protection."""
+
+
+@passphrase.command("rotate")
+@click.option(
+    "--plan",
+    type=click.Path(path_type=Path, exists=True, dir_okay=False),
+    required=True,
+    help="Version-1 rotation plan. Passphrases are forbidden in this file.",
+)
+@click.option("--approve", is_flag=True, help="Record explicit operator approval.")
+@click.option("--json", "json_out", is_flag=True, help="Emit a secret-free JSON receipt.")
+def passphrase_rotate(plan: Path, approve: bool, json_out: bool) -> None:
+    """Rotate protection using hidden interactive passphrase prompts only."""
+    import json as _json
+
+    from .rotation import RotationError, RotationPlan, rotate_passphrase
+
+    if not approve or not click.confirm("Approve this local passphrase rotation?", default=False):
+        raise click.ClickException("operator approval was not granted")
+    old_passphrase = click.prompt("Old passphrase", hide_input=True, err=True)
+    new_passphrase = click.prompt(
+        "New passphrase", hide_input=True, confirmation_prompt=True, err=True
+    )
+    try:
+        loaded = RotationPlan.load(plan)
+        receipt = rotate_passphrase(loaded, old_passphrase, new_passphrase, approved=True)
+    except RotationError as exc:
+        raise click.ClickException(str(exc)) from exc
+    finally:
+        old_passphrase = ""
+        new_passphrase = ""
+    if json_out:
+        click.echo(_json.dumps(receipt.to_dict(), sort_keys=True, indent=2))
+    else:
+        click.echo(f"rotation complete: {receipt.transaction_id}")
+        click.echo(f"fingerprint: {receipt.fingerprint}")
+        click.echo(f"rollback: {receipt.rollback_dir}/journal.json")
+        click.echo(
+            "manual handoff required: update the named Proton Pass entry from the plan, "
+            "then independently test retrieval. CapAuth never writes Proton Pass."
+        )
+
+
+@passphrase.command("rollback")
+@click.option(
+    "--journal",
+    type=click.Path(path_type=Path, exists=True, dir_okay=False),
+    required=True,
+)
+@click.option("--approve", is_flag=True, help="Record explicit operator approval.")
+def passphrase_rollback(journal: Path, approve: bool) -> None:
+    """Restore exact pre-rotation bytes from a rollback journal."""
+    from .rotation import RotationError, rollback_rotation
+
+    if not approve or not click.confirm("Approve rollback of this rotation?", default=False):
+        raise click.ClickException("operator approval was not granted")
+    try:
+        restored = rollback_rotation(journal, approved=True)
+    except RotationError as exc:
+        raise click.ClickException(str(exc)) from exc
+    click.echo(f"rollback complete: restored {len(restored)} path(s)")
+
+
 @main.group(invoke_without_command=True)
 @click.pass_context
 def doctor(ctx: click.Context) -> None:

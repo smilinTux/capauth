@@ -92,10 +92,14 @@ def init_profile(
     """
     base = resolve_capauth_home(base_dir)
     identity_dir = base / IDENTITY_DIR
+    pub_path = identity_dir / PUBLIC_KEY_FILENAME
+    priv_path = identity_dir / PRIVATE_KEY_FILENAME
+    profile_path = identity_dir / PROFILE_FILENAME
+    identity_paths = (pub_path, priv_path, profile_path)
     if estate_manifest is not None and estate_identity_type is None:
         raise ValueError("estate_identity_type is required with estate_manifest")
 
-    if (identity_dir / PROFILE_FILENAME).exists():
+    if any(path.exists() for path in identity_paths):
         raise ProfileExistsError(
             f"Profile already exists at {base}. Use 'capauth profile show' to view it."
         )
@@ -106,9 +110,6 @@ def init_profile(
     _ensure_dir(identity_dir)
     for subdir in [DATA_DIR, ACL_DIR, ADVOCATE_DIR]:
         _ensure_dir(base / subdir)
-
-    pub_path = identity_dir / PUBLIC_KEY_FILENAME
-    priv_path = identity_dir / PRIVATE_KEY_FILENAME
 
     try:
         pub_path.write_text(bundle.public_armor, encoding="utf-8")
@@ -146,14 +147,28 @@ def init_profile(
     if estate_manifest is not None:
         from .estate import manifest_active_identity
 
-        manifest_active_identity(
-            estate_manifest,
-            fingerprint=profile.key_info.fingerprint,
-            identity_type=estate_identity_type or "",
-            label=name,
-            owning_host=owning_host or socket.gethostname(),
-            allowed_secret_root=base,
-        )
+        try:
+            manifest_active_identity(
+                estate_manifest,
+                fingerprint=profile.key_info.fingerprint,
+                identity_type=estate_identity_type or "",
+                label=name,
+                owning_host=owning_host or socket.gethostname(),
+                allowed_secret_root=base,
+            )
+        except Exception as exc:
+            cleanup_errors = []
+            for path in identity_paths:
+                try:
+                    path.unlink(missing_ok=True)
+                except OSError as cleanup_error:
+                    cleanup_errors.append(f"{path}: {cleanup_error}")
+            if cleanup_errors:
+                raise StorageError(
+                    "Profile creation failed and cleanup was incomplete: "
+                    + "; ".join(cleanup_errors)
+                ) from exc
+            raise
 
     return profile
 

@@ -50,9 +50,7 @@ def _fixture(tmp_path: Path) -> tuple[RotationPlan, dict[Path, bytes]]:
                 "private_key": str(private),
                 "public_key": str(public),
                 "credential_consumers": [str(consumer)],
-                "custody_bundles": [
-                    {"path": str(bundle), "checksum_path": str(checksum)}
-                ],
+                "custody_bundles": [{"path": str(bundle), "checksum_path": str(checksum)}],
                 "rollback_root": str(tmp_path / "rollback"),
                 "proton_pass_entry": "test entry",
             }

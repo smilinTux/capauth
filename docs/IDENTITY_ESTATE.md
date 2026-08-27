@@ -31,6 +31,7 @@ to verified encrypted quarantine:
       "status": "active",
       "identity_type": "human",
       "label": "operator",
+      "owning_host": "chiap08",
       "allowed_secret_roots": [
         "/home/operator/.skcapstone/identities/operator/capauth"
       ]
@@ -53,7 +54,18 @@ to verified encrypted quarantine:
 
 Fingerprints must be full 40- or 64-hex OpenPGP primary fingerprints.
 `identity_type` is `human`, `service`, or `node`; `status` is `active` or
-`retired`. Paths may be absolute or relative to the manifest.
+`retired`. `owning_host` records the only host approved to hold an active
+private key. Paths may be absolute or relative to the manifest.
+
+Create a scoped identity and manifest it in the same operation. A manifest
+registration error makes the creation command fail visibly:
+
+```bash
+capauth --home ~/.skcapstone/capauth/identities/example init \
+  --name "Example scoped signer" --email example@skworld.io \
+  --estate-manifest ~/.skcapstone/capauth/estate.json \
+  --estate-identity-type service --owning-host "$(hostname)"
+```
 
 For retired identities, `archive` must exist and end in `.gpg`, and its current
 SHA-256 must match the manifest. `verified_at` and `verified_by` are operator
@@ -98,7 +110,23 @@ The command exits nonzero for:
 
 An unmanifested public key and multiple copies of the same active secret key
 warn. Public keys classified as active and correctly placed active private keys
-pass.
+pass. A private key discovered on a host other than its `owning_host` fails.
+
+## Scheduled detection
+
+Install the shipped user units and create the evidence directory:
+
+```bash
+mkdir -p ~/.config/systemd/user ~/.skcapstone/evidence/capauth-estate
+cp deploy/capauth-service/systemd/capauth-estate-doctor.{service,timer} \
+  ~/.config/systemd/user/
+systemctl --user daemon-reload
+systemctl --user enable --now capauth-estate-doctor.timer
+```
+
+The persistent daily timer writes a secret-free latest report and the service
+exits nonzero when the doctor finds unmanifested secret or misplaced material.
+Monitor the user unit failure through the host's normal systemd alerting path.
 
 ## Retirement gate
 

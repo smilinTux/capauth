@@ -24,15 +24,17 @@ from capauth.cli import main
 from capauth.estate import (
     EstateManifest,
     EstateStatus,
+    IdentityPolicy,
+    KeyArtifact,
+    QuarantineEvidence,
     SyncthingFolder,
     audit_estate,
     check_syncthing_policy,
     classify_artifacts,
     discover_roots,
+    quarantine_archive_metadata,
     scan_gpg_keyring,
     scan_identity_roots,
-    QuarantineEvidence,
-    quarantine_archive_metadata,
 )
 
 
@@ -194,6 +196,33 @@ def test_conflict_file_is_fingerprint_classified(tmp_path: Path) -> None:
         and f.status is EstateStatus.FAIL
         and f.fingerprint == _fingerprint(key)
         for f in findings
+    )
+
+
+def test_secret_on_non_owning_host_fails(monkeypatch, tmp_path: Path) -> None:
+    key = _key()
+    root = tmp_path / "custody"
+    manifest_path = _write_manifest(tmp_path / "estate.json", active_key=key, allowed_root=root)
+    manifest = EstateManifest.load(manifest_path)
+    original = manifest.identities[_fingerprint(key)]
+    manifest.identities[_fingerprint(key)] = IdentityPolicy(
+        fingerprint=original.fingerprint,
+        status=original.status,
+        identity_type=original.identity_type,
+        label=original.label,
+        owning_host="chiap08",
+        allowed_secret_roots=original.allowed_secret_roots,
+    )
+    monkeypatch.setattr("capauth.estate.socket.gethostname", lambda: "chiap04")
+
+    findings = classify_artifacts(
+        [KeyArtifact(_fingerprint(key), "private-file", root / "identity/private.asc", True)],
+        manifest,
+    )
+
+    assert any(
+        finding.code == "secret_host_placement" and finding.status is EstateStatus.FAIL
+        for finding in findings
     )
 
 

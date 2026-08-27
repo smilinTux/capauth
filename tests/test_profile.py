@@ -10,6 +10,8 @@ Covers:
 
 from __future__ import annotations
 
+import json
+
 import pytest
 
 from capauth.exceptions import ProfileError, ProfileExistsError
@@ -73,6 +75,127 @@ class TestInitProfile:
         priv = tmp_capauth_home / "identity" / "private.asc"
         mode = oct(priv.stat().st_mode)[-3:]
         assert mode == "600"
+
+    def test_scoped_identity_is_manifested_at_creation(self, tmp_path):
+        """A scoped identity and its custody host enter the estate together."""
+        capauth_home = tmp_path / "identities" / "throwaway"
+        manifest = tmp_path / "estate.json"
+        existing_fingerprint = "A" * 40
+        manifest.write_text(
+            json.dumps(
+                {
+                    "version": 1,
+                    "identities": [
+                        {
+                            "fingerprint": existing_fingerprint,
+                            "status": "active",
+                            "identity_type": "human",
+                            "label": "existing",
+                            "allowed_secret_roots": [str(tmp_path / "existing")],
+                        }
+                    ],
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        profile = init_profile(
+            name="Throwaway Scoped Signer",
+            email="throwaway@example.test",
+            passphrase=TEST_PASS,
+            base_dir=capauth_home,
+            estate_manifest=manifest,
+            estate_identity_type="service",
+            owning_host="qualification-host",
+        )
+
+        data = json.loads(manifest.read_text(encoding="utf-8"))
+        record = next(
+            item
+            for item in data["identities"]
+            if item["fingerprint"] == profile.key_info.fingerprint
+        )
+        assert record == {
+            "allowed_secret_roots": [str(capauth_home.resolve())],
+            "fingerprint": profile.key_info.fingerprint,
+            "identity_type": "service",
+            "label": "Throwaway Scoped Signer",
+            "owning_host": "qualification-host",
+            "status": "active",
+        }
+        assert oct((capauth_home / "identity" / "private.asc").stat().st_mode)[-3:] == "600"
+
+    @pytest.mark.parametrize(
+        ("manifest_contents", "error_type"),
+        [(None, FileNotFoundError), ("{", json.JSONDecodeError)],
+    )
+    def test_manifest_failure_removes_new_identity(self, tmp_path, manifest_contents, error_type):
+        """A failed manifest update must not leave identity artifacts."""
+        capauth_home = tmp_path / "identities" / "throwaway"
+        manifest = tmp_path / "estate.json"
+        if manifest_contents is not None:
+            manifest.write_text(manifest_contents, encoding="utf-8")
+
+        with pytest.raises(error_type):
+            init_profile(
+                name="Throwaway Scoped Signer",
+                email="throwaway@example.test",
+                passphrase=TEST_PASS,
+                base_dir=capauth_home,
+                estate_manifest=manifest,
+                estate_identity_type="service",
+                owning_host="qualification-host",
+            )
+
+        for filename in ("public.asc", "private.asc", "profile.json"):
+            assert not (capauth_home / "identity" / filename).exists()
+
+    def test_duplicate_manifest_registration_removes_new_identity(self, monkeypatch, tmp_path):
+        """A duplicate registration failure must remove new identity artifacts."""
+        capauth_home = tmp_path / "identities" / "throwaway"
+        manifest = tmp_path / "estate.json"
+        manifest.write_text('{"version": 1, "identities": []}', encoding="utf-8")
+
+        def reject_duplicate(*args, **kwargs):
+            raise ValueError("fingerprint already manifested")
+
+        monkeypatch.setattr("capauth.estate.manifest_active_identity", reject_duplicate)
+        with pytest.raises(ValueError, match="already manifested"):
+            init_profile(
+                name="Throwaway Scoped Signer",
+                email="throwaway@example.test",
+                passphrase=TEST_PASS,
+                base_dir=capauth_home,
+                estate_manifest=manifest,
+                estate_identity_type="service",
+                owning_host="qualification-host",
+            )
+
+        for filename in ("public.asc", "private.asc", "profile.json"):
+            assert not (capauth_home / "identity" / filename).exists()
+
+    def test_partial_identity_is_preserved(self, tmp_path):
+        """Existing partial identity files must not be overwritten or removed."""
+        capauth_home = tmp_path / "identities" / "partial"
+        identity_dir = capauth_home / "identity"
+        identity_dir.mkdir(parents=True)
+        public_key = identity_dir / "public.asc"
+        public_key.write_text("existing-public-material", encoding="utf-8")
+
+        with pytest.raises(ProfileExistsError):
+            init_profile(
+                name="Throwaway Scoped Signer",
+                email="throwaway@example.test",
+                passphrase=TEST_PASS,
+                base_dir=capauth_home,
+                estate_manifest=tmp_path / "estate.json",
+                estate_identity_type="service",
+                owning_host="qualification-host",
+            )
+
+        assert public_key.read_text(encoding="utf-8") == "existing-public-material"
+        assert not (identity_dir / "private.asc").exists()
+        assert not (identity_dir / "profile.json").exists()
 
     def test_duplicate_init_raises(self, tmp_capauth_home):
         """Failure: calling init twice on the same dir should fail."""

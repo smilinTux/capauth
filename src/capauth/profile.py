@@ -6,6 +6,7 @@ the decentralized replacement for a "user account."
 
 from __future__ import annotations
 
+import socket
 from pathlib import Path
 from typing import Optional
 
@@ -57,6 +58,9 @@ def init_profile(
     algorithm: Algorithm = Algorithm.RSA4096,
     backend_type: CryptoBackendType = CryptoBackendType.PGPY,
     base_dir: Optional[Path] = None,
+    estate_manifest: Optional[Path] = None,
+    estate_identity_type: Optional[str] = None,
+    owning_host: Optional[str] = None,
 ) -> SovereignProfile:
     """Create a new sovereign profile with a fresh PGP keypair.
 
@@ -74,6 +78,9 @@ def init_profile(
         algorithm: Ed25519 or RSA-4096.
         backend_type: Which crypto backend to use.
         base_dir: Root directory for the profile. Defaults to ~/.capauth/.
+        estate_manifest: Estate manifest which must receive this new identity.
+        estate_identity_type: Estate classification: human, service, or node.
+        owning_host: Host with approved custody of the new private key.
 
     Returns:
         SovereignProfile: The newly created profile.
@@ -85,6 +92,8 @@ def init_profile(
     """
     base = resolve_capauth_home(base_dir)
     identity_dir = base / IDENTITY_DIR
+    if estate_manifest is not None and estate_identity_type is None:
+        raise ValueError("estate_identity_type is required with estate_manifest")
 
     if (identity_dir / PROFILE_FILENAME).exists():
         raise ProfileExistsError(
@@ -133,6 +142,18 @@ def init_profile(
 
     profile = _sign_profile(profile, backend, bundle.private_armor, passphrase)
     _save_profile(profile, identity_dir)
+
+    if estate_manifest is not None:
+        from .estate import manifest_active_identity
+
+        manifest_active_identity(
+            estate_manifest,
+            fingerprint=profile.key_info.fingerprint,
+            identity_type=estate_identity_type or "",
+            label=name,
+            owning_host=owning_host or socket.gethostname(),
+            allowed_secret_root=base,
+        )
 
     return profile
 

@@ -6,6 +6,10 @@ All notable changes to `capauth` are documented here. The format is based on
 
 ## [Unreleased]
 
+- Register newly created scoped identities in the estate manifest with their
+  owning custody host, fail estate audits on cross-host secret placement, and
+  ship a persistent daily estate-doctor user timer (card `69805e76`).
+
 - Fail closed when a subject has no capability-ceiling assignment. Add explicit
   `service` and `connector` ceiling roles over the existing five-class fqid
   grammar, with external dispatch structurally forbidden to generic services.

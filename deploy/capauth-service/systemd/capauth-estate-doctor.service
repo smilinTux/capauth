@@ -1,0 +1,13 @@
+# Read-only CapAuth estate audit, driven by capauth-estate-doctor.timer.
+[Unit]
+Description=Audit CapAuth identity estate placement
+Documentation=https://github.com/smilinTux/capauth/blob/main/docs/IDENTITY_ESTATE.md
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/env capauth doctor estate --manifest %h/.skcapstone/capauth/estate.json --evidence %h/.skcapstone/evidence/capauth-estate/latest.json
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=%h/.skcapstone/evidence/capauth-estate

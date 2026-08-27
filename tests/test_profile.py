@@ -10,6 +10,8 @@ Covers:
 
 from __future__ import annotations
 
+import json
+
 import pytest
 
 from capauth.exceptions import ProfileError, ProfileExistsError
@@ -73,6 +75,54 @@ class TestInitProfile:
         priv = tmp_capauth_home / "identity" / "private.asc"
         mode = oct(priv.stat().st_mode)[-3:]
         assert mode == "600"
+
+    def test_scoped_identity_is_manifested_at_creation(self, tmp_path):
+        """A scoped identity and its custody host enter the estate together."""
+        capauth_home = tmp_path / "identities" / "throwaway"
+        manifest = tmp_path / "estate.json"
+        existing_fingerprint = "A" * 40
+        manifest.write_text(
+            json.dumps(
+                {
+                    "version": 1,
+                    "identities": [
+                        {
+                            "fingerprint": existing_fingerprint,
+                            "status": "active",
+                            "identity_type": "human",
+                            "label": "existing",
+                            "allowed_secret_roots": [str(tmp_path / "existing")],
+                        }
+                    ],
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        profile = init_profile(
+            name="Throwaway Scoped Signer",
+            email="throwaway@example.test",
+            passphrase=TEST_PASS,
+            base_dir=capauth_home,
+            estate_manifest=manifest,
+            estate_identity_type="service",
+            owning_host="qualification-host",
+        )
+
+        data = json.loads(manifest.read_text(encoding="utf-8"))
+        record = next(
+            item
+            for item in data["identities"]
+            if item["fingerprint"] == profile.key_info.fingerprint
+        )
+        assert record == {
+            "allowed_secret_roots": [str(capauth_home.resolve())],
+            "fingerprint": profile.key_info.fingerprint,
+            "identity_type": "service",
+            "label": "Throwaway Scoped Signer",
+            "owning_host": "qualification-host",
+            "status": "active",
+        }
 
     def test_duplicate_init_raises(self, tmp_capauth_home):
         """Failure: calling init twice on the same dir should fail."""

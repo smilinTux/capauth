@@ -217,6 +217,12 @@ class ControlPlaneBinding(StrictValue):
     """Exact invocation facts bound into the signed delegated capability."""
 
     principal: Principal
+    acting_principal_id: str | None = Field(default=None, min_length=1, max_length=256)
+    session_jti: str | None = Field(default=None, pattern=r"^[0-9a-f]{32}$")
+    device_fingerprint_ref: str | None = Field(default=None, pattern=r"^sha256:[0-9a-f]{64}$")
+    session_policy_revisions_ref: str | None = Field(
+        default=None, pattern=r"^sha256:[0-9a-f]{64}$"
+    )
     agent_id: str | None = Field(default=None, min_length=1, max_length=256)
     node_id: str = Field(min_length=1, max_length=256)
     purpose: str = Field(min_length=1, max_length=256)
@@ -234,6 +240,10 @@ class ControlPlaneBinding(StrictValue):
             raise ValueError("agent principal requires agent_id")
         if self.principal.kind != PrincipalKind.AGENT.value and self.agent_id is not None:
             raise ValueError("only an agent principal may bind agent_id")
+        if self.acting_principal_id is not None and self.acting_principal_id.strip() != (
+            self.acting_principal_id
+        ):
+            raise ValueError("acting principal cannot have surrounding whitespace")
         values = (self.node_id, self.purpose, self.target, self.resource_type)
         if any(value != value.strip() for value in values):
             raise ValueError("binding fields cannot have surrounding whitespace")
@@ -262,6 +272,14 @@ class ControlPlaneBinding(StrictValue):
         }
         if self.agent_id is not None:
             constraints.add(f"agent:{self.agent_id}")
+        if self.acting_principal_id is not None:
+            constraints.add(f"acting-principal:{self.acting_principal_id}")
+        if self.session_jti is not None:
+            constraints.add(f"session:{self.session_jti}")
+        if self.device_fingerprint_ref is not None:
+            constraints.add(f"device:{self.device_fingerprint_ref}")
+        if self.session_policy_revisions_ref is not None:
+            constraints.add(f"session-policy:{self.session_policy_revisions_ref}")
         return CapabilityScope(
             audience=self.audience,
             target=self.target,

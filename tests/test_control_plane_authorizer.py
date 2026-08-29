@@ -52,6 +52,38 @@ OWNER_REVISION = "b" * 64
 ORIGIN = "https://dashboard.example.test"
 
 
+def _object_graph_contains(root, target_type) -> bool:
+    seen: set[int] = set()
+    pending = [root]
+    while pending:
+        value = pending.pop()
+        if isinstance(value, target_type):
+            return True
+        if isinstance(value, (str, bytes, int, float, bool, type(None))):
+            continue
+        identity = id(value)
+        if identity in seen:
+            continue
+        seen.add(identity)
+        if isinstance(value, dict):
+            pending.extend(value.values())
+        elif isinstance(value, (list, tuple, set, frozenset)):
+            pending.extend(value)
+        names = getattr(type(value), "__slots__", ())
+        if isinstance(names, str):
+            names = (names,)
+        for name in names:
+            try:
+                pending.append(object.__getattribute__(value, name))
+            except (AttributeError, TypeError):
+                pass
+        try:
+            pending.extend(vars(value).values())
+        except TypeError:
+            pass
+    return False
+
+
 class Clock:
     def __init__(self) -> None:
         self.value = NOW
@@ -358,8 +390,6 @@ def test_currentness_verifier_rejects_direct_permissive_construction() -> None:
 
 
 def test_currentness_factory_and_object_setattr_cannot_forge_issuance() -> None:
-    from capauth.control_plane_authorizer import _CURRENTNESS_FACTORY
-
     rig = Rig()
     issuer = rig.authorizer()
     result, verifier = issuer.authorize_with_currentness(rig.bearer(), rig.invocation())
@@ -375,18 +405,12 @@ def test_currentness_factory_and_object_setattr_cannot_forge_issuance() -> None:
     )
     assert result.context is not None
     assert genuine is not None
-    forged = ControlPlaneCurrentnessVerifier(
-        _CURRENTNESS_FACTORY,
-        issuer=issuer,
-        issue_nonce=b"n" * 32,
-        issue_mac=b"m" * 32,
-        authorizer=object.__getattribute__(genuine, "_authorizer"),
-        presented=object.__getattribute__(genuine, "_presented"),
-        request=object.__getattribute__(genuine, "_request"),
-        prior=object.__getattribute__(genuine, "_prior"),
-        context=result.context,
-        receipts=object.__getattribute__(genuine, "_receipts"),
-    )
+    forged = object.__new__(ControlPlaneCurrentnessVerifier)
+    object.__setattr__(forged, "_context", result.context)
+    object.__setattr__(forged, "_context_fingerprint", b"f" * 32)
+    object.__setattr__(forged, "_handle", b"h" * 32)
+    object.__setattr__(forged, "_lock", Lock())
+    object.__setattr__(forged, "_phase", 0)
     assert forged.check_before_owner_read(result.context) is DecisionState.DENY
     assert genuine.check_before_owner_read(result.context) is DecisionState.ALLOW
     assert genuine.check_after_owner_read(result.context) is DecisionState.ALLOW
@@ -394,24 +418,14 @@ def test_currentness_factory_and_object_setattr_cannot_forge_issuance() -> None:
 
 
 def test_exact_private_field_clone_cannot_consume_genuine_verifier() -> None:
-    from capauth.control_plane_authorizer import _CURRENTNESS_FACTORY
-
     rig = Rig()
     result, genuine = rig.authorizer().authorize_with_currentness(rig.bearer(), rig.invocation())
     assert result.context is not None
     assert genuine is not None
-    clone = ControlPlaneCurrentnessVerifier(
-        _CURRENTNESS_FACTORY,
-        issuer=object.__getattribute__(genuine, "_issuer"),
-        issue_nonce=object.__getattribute__(genuine, "_issue_nonce"),
-        issue_mac=object.__getattribute__(genuine, "_issue_mac"),
-        authorizer=object.__getattribute__(genuine, "_authorizer"),
-        presented=object.__getattribute__(genuine, "_presented"),
-        request=object.__getattribute__(genuine, "_request"),
-        prior=object.__getattribute__(genuine, "_prior"),
-        context=result.context,
-        receipts=object.__getattribute__(genuine, "_receipts"),
-    )
+    clone = object.__new__(ControlPlaneCurrentnessVerifier)
+    for name in ("_context", "_context_fingerprint", "_handle", "_phase"):
+        object.__setattr__(clone, name, object.__getattribute__(genuine, name))
+    object.__setattr__(clone, "_lock", Lock())
 
     assert clone.check_before_owner_read(result.context) is DecisionState.DENY
     assert genuine.check_before_owner_read(result.context) is DecisionState.ALLOW
@@ -431,7 +445,16 @@ def test_malformed_same_object_context_denies_and_releases_private_state() -> No
     assert verifier.check_before_owner_read(result.context) is DecisionState.DENY
     assert rig.capability_authorizer._receipt_expiries == {}
     assert issuer._verifier_states == {}
-    assert object.__getattribute__(verifier, "_presented") is None
+    assert not hasattr(verifier, "_presented")
+
+
+def test_currentness_verifier_object_graph_contains_no_presented_capability() -> None:
+    rig = Rig()
+    result, verifier = rig.authorizer().authorize_with_currentness(rig.bearer(), rig.invocation())
+    assert result.context is not None
+    assert verifier is not None
+    assert not _object_graph_contains(verifier, PresentedCapability)
+    verifier.close()
 
 
 def test_currentness_verifier_detects_principal_change_and_expiry() -> None:

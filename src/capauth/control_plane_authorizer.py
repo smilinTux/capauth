@@ -641,12 +641,12 @@ class ControlPlaneDecisionAuthorizer:
         if not issued_at <= now < expires_at:
             return closed(_result(DecisionState.DENY, DecisionCode.EXPIRED))
 
-        first = self._owner_decision(binding, capauth)
+        effective_capauth = capauth.model_copy(update={"scope": binding.capability_scope()})
+        first = self._owner_decision(binding, effective_capauth)
         if first is None:
             return closed(
                 _result(DecisionState.UNAVAILABLE, DecisionCode.OWNER_POLICY_UNAVAILABLE)
             )
-        effective_capauth = capauth.model_copy(update={"scope": binding.capability_scope()})
         first_joined = join_policy_decisions(binding, effective_capauth, first)
         if not first_joined.allow:
             return closed(_result(first_joined.state, first_joined.code))
@@ -670,14 +670,14 @@ class ControlPlaneDecisionAuthorizer:
             return closed(_capauth_denial(exc.decision.reason))
         except Exception:
             return closed(_result(DecisionState.UNAVAILABLE, DecisionCode.CAPAUTH_UNAVAILABLE))
-        second = self._owner_decision(binding, capauth)
+        effective_capauth = capauth.model_copy(update={"scope": binding.capability_scope()})
+        second = self._owner_decision(binding, effective_capauth)
         if second is None:
             return closed(
                 _result(DecisionState.UNAVAILABLE, DecisionCode.OWNER_POLICY_UNAVAILABLE)
             )
         if first != second:
             return closed(_result(DecisionState.DENY, DecisionCode.BINDING_MISMATCH))
-        effective_capauth = capauth.model_copy(update={"scope": binding.capability_scope()})
         joined = join_policy_decisions(binding, effective_capauth, second)
         if not joined.allow:
             return closed(_result(joined.state, joined.code))
@@ -689,7 +689,7 @@ class ControlPlaneDecisionAuthorizer:
             context = SanitizedControlPlaneDecisionV1(
                 binding=binding,
                 boundary=invocation.boundary,
-                capauth_decision=capauth,
+                capauth_decision=effective_capauth,
                 joined_decision=joined,
                 authenticated_identity_ref=_identity_ref(binding, capauth),
                 issued_at=issued_at,

@@ -102,7 +102,9 @@ class InjectedIssuer:
 
 
 class OwnerPolicy:
-    def decide(self, binding, _capauth_decision):
+    def decide(self, binding, capauth_decision):
+        if capauth_decision.scope != binding.capability_scope():
+            return None
         return OwnerPolicyDecision(
             state=DecisionState.ALLOW,
             revision=binding.owner_policy_revision,

@@ -672,13 +672,21 @@ def test_signed_expiry_constraint_is_an_upper_ceiling() -> None:
     rig = Rig()
     rig.binding = rig.binding.model_copy(update={"expires_at": NOW + timedelta(seconds=61)})
 
-    result = _allow(rig, bearer=rig.bearer(ttl_seconds=60))
+    class ExactScopeOwner:
+        def decide(self, binding, capauth_decision):
+            return (
+                _owner(binding) if capauth_decision.scope == binding.capability_scope() else None
+            )
+
+    result = _allow(
+        rig,
+        bearer=rig.bearer(ttl_seconds=60),
+        owner=ExactScopeOwner(),
+    )
 
     assert result.context.expires_at == NOW + timedelta(seconds=60)
     assert result.context.binding.expires_at == result.context.expires_at
-    assert result.context.capauth_decision.scope.constraints == (
-        rig.binding.capability_scope().constraints
-    )
+    assert result.context.capauth_decision.scope == result.context.binding.capability_scope()
     assert result.context.joined_decision.scope == result.context.binding.capability_scope()
 
 

@@ -6,6 +6,10 @@ All notable changes to `capauth` are documented here. The format is based on
 
 ## [Unreleased]
 
+- Normalize control-plane authorization decisions to the actual reconstructed
+  token lifetime before exact owner-policy evaluation, while retaining the raw
+  signed decision for replay and currentness receipts (card `9b0c6dce`).
+
 - Fail closed when a subject has no capability-ceiling assignment. Add explicit
   `service` and `connector` ceiling roles over the existing five-class fqid
   grammar, with external dispatch structurally forbidden to generic services.

@@ -1,9 +1,11 @@
 import copy
 import os
 import pickle
+import sqlite3
+import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
-from threading import Lock
+from threading import Barrier, Lock
 
 import pytest
 
@@ -396,8 +398,10 @@ def test_sqlite_backend_reserves_one_concurrent_nonce(tmp_path):
     path = tmp_path / "operator-sessions.sqlite3"
     backend = SQLiteOperatorSessionBackend(path)
     manager, _factory, _authorizer, _clock, _current, cookie, csrf = make_rig(backend)
+    ready = Barrier(8)
 
     def authenticate_once(_):
+        ready.wait()
         try:
             manager.authenticate(
                 cookie=cookie,
@@ -413,6 +417,38 @@ def test_sqlite_backend_reserves_one_concurrent_nonce(tmp_path):
     with ThreadPoolExecutor(max_workers=8) as pool:
         outcomes = list(pool.map(authenticate_once, range(8)))
     assert sum(outcomes) == 1
+    with pytest.raises(ControlPlaneSessionDeniedError):
+        manager.authenticate(
+            cookie=cookie,
+            csrf=csrf,
+            origin=ORIGIN,
+            device_fingerprint=DEVICE,
+            request_nonce="nonce-concurrent-00001",
+        )
+
+
+def test_sqlite_backend_lock_wait_is_bounded_and_fails_closed(tmp_path):
+    os.chmod(tmp_path, 0o700)
+    path = tmp_path / "operator-sessions.sqlite3"
+    backend = SQLiteOperatorSessionBackend(path)
+    manager, _factory, _authorizer, _clock, _current, cookie, csrf = make_rig(backend)
+    lock_holder = sqlite3.connect(path, timeout=0, isolation_level=None)
+    lock_holder.execute("BEGIN EXCLUSIVE")
+    started = time.monotonic()
+    try:
+        with pytest.raises(ControlPlaneSessionDeniedError):
+            manager.authenticate(
+                cookie=cookie,
+                csrf=csrf,
+                origin=ORIGIN,
+                device_fingerprint=DEVICE,
+                request_nonce="nonce-locked-00000001",
+            )
+    finally:
+        lock_holder.rollback()
+        lock_holder.close()
+    elapsed = time.monotonic() - started
+    assert 4.5 <= elapsed < 10.0
 
 
 def test_unsafe_sqlite_parent_and_file_are_rejected(tmp_path):

@@ -233,9 +233,9 @@ class SQLiteOperatorSessionBackend:
 
     def _connect(self) -> sqlite3.Connection:
         self._validate_file()
-        connection = sqlite3.connect(self._path, timeout=0, isolation_level=None)
+        connection = sqlite3.connect(self._path, timeout=5.0, isolation_level=None)
         connection.execute("PRAGMA foreign_keys = ON")
-        connection.execute("PRAGMA busy_timeout = 0")
+        connection.execute("PRAGMA busy_timeout = 5000")
         connection.execute("PRAGMA synchronous = FULL")
         return connection
 

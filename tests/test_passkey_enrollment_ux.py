@@ -20,4 +20,5 @@ def test_bunker_guides_browser_identity_setup() -> None:
     assert '$("pair-card").classList.add("hidden")' in controller
     assert '$("continue-passkey").classList.remove("hidden")' in controller
     assert "vaultPass !== vaultConfirm" in controller
-    assert 'requestedNext.startsWith("/")' in controller
+    assert "requestedNext" not in controller
+    assert "safeNext" not in controller

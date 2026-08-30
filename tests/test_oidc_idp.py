@@ -300,7 +300,8 @@ def test_passkey_enrollment_page_documents_exact_signing_contract(oidc_app):
     assert "Create the passkey" in response.text
     assert "After creation, return to SKDashboard" in response.text
     assert "Set up this browser" in response.text
-    assert "/bunker/?mode=setup&amp;next=/oidc/passkey/enroll" in response.text
+    assert "/bunker/?mode=setup" in response.text
+    assert "next=" not in response.text
     assert "Do not create a new key" in response.text
     assert "Advanced recovery: prove the identity manually" in response.text
     assert "passkey_rp_unavailable" in response.text

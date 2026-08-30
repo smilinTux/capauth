@@ -508,11 +508,6 @@ $("btn-hide-qr").onclick = hideKeyQR;
 // Allow opening with the URI pre-filled: /bunker/?uri=... or #capauth-bunker://
 const fromQuery = new URLSearchParams(location.search).get("uri");
 const setupMode = new URLSearchParams(location.search).get("mode") === "setup";
-const requestedNext = new URLSearchParams(location.search).get("next") || "";
-const safeNext = requestedNext.startsWith("/") && !requestedNext.startsWith("//")
-  ? requestedNext
-  : "/oidc/passkey/enroll";
-$("continue-passkey").href = safeNext;
 if (setupMode) {
   $("page-title").textContent = "Set up this browser";
   $("page-subtitle").textContent = "Load your existing identity once, then create your passkey.";

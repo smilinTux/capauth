@@ -86,7 +86,22 @@ Changelog = "https://github.com/smilinTux/capauth/releases"
 where = ["src"]
 
 [tool.setuptools.package-data]
-capauth = ["SKILL.md", "service/oidc/static/bunker/lib/*.js", "service/oidc/static/bunker/vendor/*.js"]
+capauth = ["SKILL.md"]
+
+[tool.setuptools.exclude-package-data]
+"capauth.service.oidc.static.bunker.lib" = ["*.js"]
+"capauth.service.oidc.static.bunker.vendor" = ["*.js"]
+
+[tool.setuptools.data-files]
+"share/capauth/phone-signer" = [
+    "phone-signer/app.js",
+    "phone-signer/index.html",
+    "phone-signer/manifest.webmanifest",
+    "phone-signer/sw.js",
+]
+"share/capauth/phone-signer/icons" = ["phone-signer/icons/*.png"]
+"share/capauth/phone-signer/lib" = ["phone-signer/lib/*.js"]
+"share/capauth/phone-signer/vendor" = ["phone-signer/vendor/*.js"]
 
 [tool.black]
 line-length = 99

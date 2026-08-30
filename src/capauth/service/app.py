@@ -20,6 +20,7 @@ import json
 import logging
 import os
 import secrets
+import sysconfig
 import time
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -1420,6 +1421,24 @@ def _bunker_auth_ok(request: Request) -> bool:
 
 # Directory holding the phone-signer PWA static assets.
 _PHONE_SIGNER_DIR = Path(__file__).resolve().parent.parent.parent.parent / "phone-signer"
+_PACKAGED_PHONE_SIGNER_DIR = (
+    Path(sysconfig.get_path("data")) / "share" / "capauth" / "phone-signer"
+)
+_LEGACY_PHONE_SIGNER_DIR = Path(__file__).parent / "oidc" / "static" / "bunker"
+
+
+def _phone_signer_asset(asset: str) -> Path:
+    """Resolve one source or installed PWA asset without leaving its root."""
+    for root in (_PHONE_SIGNER_DIR, _PACKAGED_PHONE_SIGNER_DIR, _LEGACY_PHONE_SIGNER_DIR):
+        asset_root = root.resolve()
+        target = (asset_root / asset).resolve()
+        try:
+            target.relative_to(asset_root)
+        except ValueError:
+            raise HTTPException(status_code=403, detail="forbidden")
+        if target.is_file():
+            return target
+    raise HTTPException(status_code=404, detail="phone-signer PWA not bundled")
 
 
 def _broker_host(request: Optional["Request"] = None) -> str:
@@ -1627,10 +1646,8 @@ async def bunker_notify(req: PushNotifyRequest, request: Request) -> dict[str, A
 @app.get("/bunker/signer", response_class=HTMLResponse)
 async def phone_signer_page() -> Any:
     """Serve the phone-signer PWA entry page (mobile-friendly)."""
-    index = _PHONE_SIGNER_DIR / "index.html"
-    if index.exists():
-        return FileResponse(str(index), media_type="text/html", headers=_PWA_NO_CACHE)
-    raise HTTPException(status_code=404, detail="phone-signer PWA not bundled")
+    index = _phone_signer_asset("index.html")
+    return FileResponse(str(index), media_type="text/html", headers=_PWA_NO_CACHE)
 
 
 @app.get("/bunker/{asset:path}")
@@ -1639,17 +1656,7 @@ async def phone_signer_asset(asset: str) -> Any:
 
     Path-traversal guarded: the resolved path must stay within its asset root.
     """
-    asset_root = _PHONE_SIGNER_DIR.resolve()
-    target = (asset_root / asset).resolve()
-    if not target.is_file():
-        asset_root = (Path(__file__).parent / "oidc" / "static" / "bunker").resolve()
-        target = (asset_root / asset).resolve()
-    try:
-        target.relative_to(asset_root)
-    except ValueError:
-        raise HTTPException(status_code=403, detail="forbidden")
-    if not target.is_file():
-        raise HTTPException(status_code=404, detail="not found")
+    target = _phone_signer_asset(asset)
     # Vendored third-party libs (e.g. openpgp.min.js) are content-stable + large
     # — cache them long so the 540KB OpenPGP bundle isn't refetched every load.
     # App code stays no-cache so fixes always propagate.

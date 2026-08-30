@@ -618,7 +618,7 @@ _ENROLL_PAGE = """<!DOCTYPE html>
   <div class="workflow-step">
     <h2><span class="number">1</span>Check this browser</h2>
     <div class="identity" id="identity-status">Checking for your existing CapAuth identity...</div>
-    <a class="setup" id="setup-identity" href="{base_url}/bunker/">Set up this browser</a>
+    <a class="setup" id="setup-identity" href="{base_url}/bunker/?mode=setup&amp;next=/oidc/passkey/enroll">Set up this browser</a>
     <p class="sub" style="font-size:.74rem;margin:.4rem 0 0">You only need to load your existing identity. Do not create a new key.</p>
   </div>
 

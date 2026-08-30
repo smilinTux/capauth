@@ -80,8 +80,12 @@ async function fingerprintOf(armored) {
 async function storeKey() {
   const armored = $("priv-key").value.trim();
   const vaultPass = $("vault-pass").value;
-  if (!armored) return setStatus($("key-status"), "Paste an armored private key.", "err");
-  if (!vaultPass) return setStatus($("key-status"), "A vault passphrase is required.", "err");
+  const vaultConfirm = $("vault-pass-confirm").value;
+  if (!armored) return setStatus($("key-status"), "Choose an armored private key file.", "err");
+  if (!vaultPass) return setStatus($("key-status"), "Choose a browser vault passphrase.", "err");
+  if (vaultPass !== vaultConfirm) {
+    return setStatus($("key-status"), "The two browser vault passphrases do not match.", "err");
+  }
   try {
     // Validate it's a real (private) key + capture fingerprint.
     const priv = await openpgp.readPrivateKey({ armoredKey: armored });
@@ -110,7 +114,8 @@ async function storeKey() {
     $("priv-key").value = "";
     $("pgp-pass").value = "";
     $("vault-pass").value = "";
-    setStatus($("key-status"), "Key encrypted + stored on this phone.", "ok");
+    $("vault-pass-confirm").value = "";
+    setStatus($("key-status"), "Identity saved in this browser. Continue to passkey setup.", "ok");
     renderKeyState();
   } catch (err) {
     setStatus($("key-status"), "Could not read/store key: " + err.message, "err");
@@ -161,6 +166,23 @@ function renderKeyState() {
   } else {
     $("key-import").classList.remove("hidden");
     $("key-unlock").classList.add("hidden");
+    setStatus($("key-status"), "Setup needed: choose your existing identity file.");
+  }
+}
+
+async function loadKeyFile() {
+  const file = $("key-file").files[0];
+  if (!file) return;
+  try {
+    const armored = await file.text();
+    if (!armored.includes("BEGIN PGP PRIVATE KEY BLOCK")) {
+      throw new Error("This is not an armored PGP private key file.");
+    }
+    $("priv-key").value = armored;
+    setStatus($("key-status"), "Identity file loaded. Complete the two passphrase fields below.", "ok");
+  } catch (err) {
+    $("priv-key").value = "";
+    setStatus($("key-status"), "Could not use that file: " + err.message, "err");
   }
 }
 
@@ -469,6 +491,7 @@ async function enablePush() {
 
 // --- wire up ----------------------------------------------------------------
 $("btn-store").onclick = storeKey;
+$("key-file").onchange = loadKeyFile;
 $("btn-unlock").onclick = unlockKey;
 $("btn-forget").onclick = forgetKey;
 $("btn-pair").onclick = connect;
@@ -480,6 +503,17 @@ $("btn-hide-qr").onclick = hideKeyQR;
 
 // Allow opening with the URI pre-filled: /bunker/?uri=... or #capauth-bunker://
 const fromQuery = new URLSearchParams(location.search).get("uri");
+const setupMode = new URLSearchParams(location.search).get("mode") === "setup";
+const requestedNext = new URLSearchParams(location.search).get("next") || "";
+const safeNext = requestedNext.startsWith("/") && !requestedNext.startsWith("//")
+  ? requestedNext
+  : "/oidc/passkey/enroll";
+$("continue-passkey").href = safeNext;
+if (setupMode) {
+  $("page-title").textContent = "Set up this browser";
+  $("page-subtitle").textContent = "Load your existing identity once, then create your passkey.";
+  $("pair-card").classList.add("hidden");
+}
 const fromHash = location.hash.startsWith("#capauth-bunker")
   ? location.hash.slice(1)
   : "";

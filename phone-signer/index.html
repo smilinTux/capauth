@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
   <meta name="theme-color" content="#0f0f1a" />
-  <title>CapAuth Bunker — Phone Signer</title>
+  <title>CapAuth identity setup</title>
   <link rel="manifest" href="manifest.webmanifest" />
   <link rel="apple-touch-icon" href="icons/icon-192.png" />
   <style>
@@ -43,6 +43,11 @@
     button.ok { background:var(--ok); }
     button.danger { background:var(--err); }
     button:disabled { opacity:.5; }
+    .action-link {
+      display:block; background:var(--ok); color:#fff; border-radius:8px;
+      padding:12px 18px; font-size:14px; font-weight:600; text-align:center;
+      text-decoration:none; width:100%; margin-top:12px;
+    }
     .row { display:flex; gap:8px; }
     .row button { margin-top:0; }
     .status { font-size:12px; color:var(--muted); margin-top:12px; min-height:16px; }
@@ -93,33 +98,33 @@
 </head>
 <body>
   <header>
-    <h1>🛡️ CapAuth Bunker</h1>
-    <div class="sub">Your phone holds the key. The key never leaves this device.</div>
+    <h1 id="page-title">CapAuth identity</h1>
+    <div class="sub" id="page-subtitle">One-time setup. Your key stays encrypted in this browser.</div>
   </header>
 
   <!-- Step 1: key -->
   <section class="card" id="key-card">
-    <h2>1 · Key</h2>
-    <div id="key-status" class="status">No key loaded.</div>
+    <h2>1. Load your existing identity</h2>
+    <div id="key-status" class="status">Checking this browser...</div>
     <div id="key-import">
-      <label>Armored PGP private key</label>
-      <textarea id="priv-key" placeholder="-----BEGIN PGP PRIVATE KEY BLOCK-----"></textarea>
+      <label for="key-file">Choose your armored PGP private key file</label>
+      <input id="key-file" type="file" accept=".asc,.pgp,.gpg,text/plain" />
+      <div class="hint">Example: <code>jarvis-private.asc</code>. The file is read only in this browser and is never uploaded.</div>
       <details class="hint">
-        <summary>How do I get this from my computer?</summary>
-        On your computer's terminal:<br />
-        1 · list your keys → <code>gpg --list-secret-keys --keyid-format=long</code><br />
-        2 · export the private key → <code>gpg --armor --export-secret-keys YOUR_KEY_ID</code><br />
-        Copy the whole <code>BEGIN…END PGP PRIVATE KEY BLOCK</code> and paste it above.<br />
-        <span style="color:var(--accent2)">The service needs your <em>public</em> key registered too:</span>
-        <code>gpg --armor --export YOUR_KEY_ID</code>
+        <summary>Advanced: paste an armored key instead</summary>
+        <label for="priv-key">Armored PGP private key</label>
+        <textarea id="priv-key" placeholder="-----BEGIN PGP PRIVATE KEY BLOCK-----"></textarea>
+        Paste the complete block, including the BEGIN and END lines.
       </details>
-      <label>Key passphrase (PGP) — optional</label>
-      <input id="pgp-pass" type="password" autocomplete="off" />
-      <div class="hint">If your key has a PGP passphrase (the long one from your keyring), enter it here <em>once</em>. The bunker strips it and re-protects the key with just your Vault passphrase below — so from then on you only ever type the Vault passphrase. Leave blank if your key has no passphrase.</div>
-      <label>Vault passphrase (encrypts the key on this phone)</label>
-      <input id="vault-pass" type="password" autocomplete="off" />
-      <div class="hint">A passphrase that encrypts the key <em>at rest on this phone</em> (PBKDF2 → AES-GCM). You'll re-enter it to Unlock. Can be the same as the PGP one.</div>
-      <button id="btn-store">Encrypt &amp; store on this phone</button>
+      <label for="pgp-pass">Current key passphrase</label>
+      <input id="pgp-pass" type="password" autocomplete="off" placeholder="Leave blank if the key has no passphrase" />
+      <div class="hint">This is used once to unlock the imported key. It is not stored.</div>
+      <label for="vault-pass">Choose a browser vault passphrase</label>
+      <input id="vault-pass" type="password" autocomplete="new-password" placeholder="Use a long phrase you can re-enter" />
+      <label for="vault-pass-confirm">Enter the browser vault passphrase again</label>
+      <input id="vault-pass-confirm" type="password" autocomplete="new-password" />
+      <div class="hint">You will enter this phrase when CapAuth needs to prove your identity. It never leaves this browser.</div>
+      <button id="btn-store">Save identity in this browser</button>
       <details class="hint">
         <summary>📤 Send this key to another device (QR)</summary>
         Paste your key above, set a transfer PIN, then show a QR your other device
@@ -138,20 +143,24 @@
     </div>
     <div id="key-unlock" class="hidden">
       <span class="pill" id="loaded-fp"></span>
-      <label>Vault passphrase</label>
-      <input id="unlock-pass" type="password" autocomplete="off" />
+      <a id="continue-passkey" class="action-link" href="/oidc/passkey/enroll">Continue to passkey setup</a>
+      <details class="hint" id="signer-controls">
+      <summary>Advanced: unlock for remote signing</summary>
+      <label for="unlock-pass">Browser vault passphrase</label>
+      <input id="unlock-pass" type="password" autocomplete="current-password" />
       <div class="row">
         <button id="btn-unlock">Unlock</button>
         <button id="btn-forget" class="secondary">Forget key</button>
       </div>
       <button id="btn-push" class="secondary">🔔 Enable background approvals</button>
       <div id="push-status" class="hint">Get a notification to approve sign-ins even when this page is closed.</div>
+      </details>
     </div>
   </section>
 
   <!-- Step 2: pair -->
   <section class="card" id="pair-card">
-    <h2>2 · Pair with desktop</h2>
+    <h2>Advanced: pair with another device</h2>
     <label>Bunker URI (scan QR or paste)</label>
     <input id="bunker-uri" placeholder="capauth-bunker://host/session?key=..." />
     <div class="hint">When you start a login on your computer it shows a QR / <code>capauth-bunker://…</code> link. Scan or paste it here, then Connect — this phone signs the login request.</div>

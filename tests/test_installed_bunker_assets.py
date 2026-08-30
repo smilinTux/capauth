@@ -90,7 +90,7 @@ for asset in {ASSETS!r}:
     response = client.get('/bunker/' + asset)
     assert response.status_code == 200, (asset, response.status_code)
     assert response.content
-page = client.get('/bunker/')
+page = client.get('/bunker/?mode=setup')
 assert page.status_code == 200
 assert b'Load your existing identity' in page.content
 for asset in ('../outside.txt', '../../../pyproject.toml'):

@@ -593,6 +593,10 @@ _ENROLL_PAGE = """<!DOCTYPE html>
     button{{width:100%;background:#7C3AED;color:#fff;border:none;border-radius:8px;padding:.8rem;font-size:1rem;cursor:pointer;font-weight:600;margin-top:.4rem}}
     .nonce-box{{background:#0f0f1a;border:1px solid #334155;border-radius:8px;padding:.6rem;font-family:monospace;font-size:.76rem;color:#00e5ff;word-break:break-all;margin-bottom:.6rem}}
     .msg{{font-size:.85rem;margin-top:.8rem;min-height:1.1rem}}
+    .identity{{background:#0f0f1a;border:1px solid #334155;border-radius:8px;padding:.7rem .8rem;
+               color:#94a3b8;font-size:.8rem;margin:.8rem 0}}
+    details{{border-top:1px solid #334155;margin-top:1.1rem;padding-top:.8rem}}
+    summary{{color:#a78bfa;cursor:pointer;font-size:.85rem}}
     .ok{{color:#34d399}} .err{{color:#f87171}}
     code{{color:#a78bfa}}
   </style>
@@ -604,22 +608,23 @@ _ENROLL_PAGE = """<!DOCTYPE html>
      your sovereign PGP identity. Prove your fingerprint with PGP once, then create a passkey for it.
      (Convenience tier — your PGP key stays the root of trust.)</p>
 
-  <button id="ld-enroll" onclick="enrollLocal()" style="background:#10b981">📱 Sign on THIS device &amp; create passkey</button>
-  <p class="sub" style="font-size:.74rem;margin:.4rem 0 0">Uses the key in your bunker on this device (asks your vault passphrase). Easiest — do this in your normal browser, then your passkey works in the Nextcloud app.</p>
-  <div style="display:flex;align-items:center;gap:.6rem;margin:1.1rem 0 .2rem;color:#475569;font-size:.72rem">
-    <span style="flex:1;height:1px;background:#334155"></span>OR sign manually (advanced)<span style="flex:1;height:1px;background:#334155"></span>
-  </div>
+  <div class="identity" id="identity-status">Checking this browser for a CapAuth identity...</div>
+  <button id="ld-enroll" onclick="enrollLocal()" style="background:#10b981">Create passkey with this device</button>
+  <p class="sub" style="font-size:.74rem;margin:.4rem 0 0">If no identity is detected, <a href="{base_url}/bunker/" style="color:#a78bfa">open the Bunker</a>, load your existing identity, then return here.</p>
 
-  <div class="step">1 — Your PGP fingerprint</div>
-  <input id="fp" maxlength="64" placeholder="ABCDEF0123..." autocomplete="off"/>
-  <div class="step">2 - Exact message to sign</div>
-  <div class="nonce-box" id="nonce" style="white-space:pre-wrap">Enter your fingerprint to load the complete signed payload.</div>
-  <button type="button" onclick="copyPayload()" style="width:auto;padding:.45rem .7rem;font-size:.78rem;background:#334155">Copy message</button>
-  <div class="step">3 - PGP signed message or detached signature</div>
-  <textarea id="sig" placeholder="-----BEGIN PGP MESSAGE-----"></textarea>
-  <textarea id="pub" style="min-height:70px" placeholder="(first time) paste your public key"></textarea>
-  <p class="sub" style="font-size:.74rem">Copy the complete message, then use <code>gpg --armor --sign</code> for an inline signed message or <code>gpg --armor --detach-sign</code> for a detached signature.</p>
-  <button onclick="enroll()">Prove with PGP &amp; create passkey</button>
+  <details id="manual-enrollment">
+    <summary>Advanced: sign a fresh challenge manually</summary>
+    <div class="step">1 - Your PGP fingerprint</div>
+    <input id="fp" maxlength="64" placeholder="ABCDEF0123..." autocomplete="off"/>
+    <div class="step">2 - Exact message to sign</div>
+    <div class="nonce-box" id="nonce" style="white-space:pre-wrap">Enter your fingerprint to load the complete signed payload.</div>
+    <button type="button" onclick="copyPayload()" style="width:auto;padding:.45rem .7rem;font-size:.78rem;background:#334155">Copy message</button>
+    <div class="step">3 - Fresh PGP signature</div>
+    <textarea id="sig" placeholder="-----BEGIN PGP MESSAGE-----"></textarea>
+    <textarea id="pub" style="min-height:70px" placeholder="Public key, only if this identity is not enrolled yet"></textarea>
+    <p class="sub" style="font-size:.74rem">Copy the complete message, then use <code>gpg --armor --sign</code> for an inline signed message or <code>gpg --armor --detach-sign</code> for a detached signature.</p>
+    <button onclick="enroll()">Verify signature and create passkey</button>
+  </details>
   <div class="msg" id="msg"></div>
 </div>
 <script src="{base_url}/oidc/passkey.js"></script>
@@ -630,9 +635,23 @@ const BASE="{base_url}";
 window._capauthBase = BASE;
 let currentNonce=null, currentPayload="";
 function msg(t,ok){{ const e=document.getElementById("msg"); e.textContent=t; e.className="msg "+(ok?"ok":"err"); }}
+function detectLocalIdentity(){{
+  const fp=(localStorage.getItem("capauth_bunker_fp")||"").trim().toUpperCase().replace(/\\s/g,"");
+  const hasEnvelope=Boolean(localStorage.getItem("capauth_bunker_envelope"));
+  const valid=[40,64].includes(fp.length)&&/^[0-9A-F]+$/.test(fp)&&hasEnvelope;
+  const status=document.getElementById("identity-status");
+  if(valid){{
+    status.textContent="Ready: CapAuth identity "+fp.slice(0,8)+"..."+fp.slice(-8)+" is loaded in this browser.";
+    document.getElementById("fp").value=fp;
+  }}else{{
+    status.textContent="No CapAuth identity is loaded in this browser yet.";
+  }}
+  return valid;
+}}
 async function enrollLocal(){{
   if(!window.capauthWebAuthn||!window.capauthWebAuthn.available()) return msg("This browser has no passkey support.",false);
   if(!window.capauthLocalProof) return msg("Still loading — try again in a second.",false);
+  if(!detectLocalIdentity()) return msg("Open the Bunker, load your existing identity, then return here.",false);
   msg("Unlocking your key + creating passkey…",true);
   try{{
     const proof=await window.capauthLocalProof(BASE);
@@ -680,6 +699,7 @@ async function enroll(){{
     msg("✅ Passkey created for "+res.fingerprint.slice(0,8)+"… — you can now sign in with it.",true);
   }}catch(e){{ msg("Failed: "+e.message,false); }}
 }}
+detectLocalIdentity();
 </script>
 </body>
 </html>

@@ -289,6 +289,13 @@ def test_passkey_enrollment_page_documents_exact_signing_contract(oidc_app):
     assert "gpg --armor --sign" in response.text
     assert "gpg --armor --detach-sign" in response.text
     assert 'maxlength="64"' in response.text
+    assert "Create passkey with this device" in response.text
+    assert "Checking this browser for a CapAuth identity" in response.text
+    assert 'localStorage.getItem("capauth_bunker_fp")' in response.text
+    assert 'localStorage.getItem("capauth_bunker_envelope")' in response.text
+    assert '<details id="manual-enrollment">' in response.text
+    assert "Advanced: sign a fresh challenge manually" in response.text
+    assert "/bunker/" in response.text
 
 
 def test_ip_issuer_passkey_preflight_denies_before_pgp_verification(oidc_app, monkeypatch):

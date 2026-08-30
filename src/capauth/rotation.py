@@ -70,9 +70,7 @@ class RotationPlan:
             if not isinstance(item, dict):
                 raise RotationError(f"custody_bundles[{index}] must be an object")
             bundle = local(item.get("path"), f"custody_bundles[{index}].path")
-            checksum = local(
-                item.get("checksum_path"), f"custody_bundles[{index}].checksum_path"
-            )
+            checksum = local(item.get("checksum_path"), f"custody_bundles[{index}].checksum_path")
             bundles.append((bundle, checksum))
 
         operator = str(raw.get("operator") or "").strip()
@@ -269,9 +267,13 @@ def rotate_passphrase(
         else:
             absent_before.add(checksum)
         try:
-            bundle_plaintexts.append(pgpy.PGPMessage.from_blob(data).decrypt(old_passphrase).message)
+            bundle_plaintexts.append(
+                pgpy.PGPMessage.from_blob(data).decrypt(old_passphrase).message
+            )
         except Exception as exc:
-            raise RotationError(f"old passphrase could not decrypt custody bundle: {bundle}") from exc
+            raise RotationError(
+                f"old passphrase could not decrypt custody bundle: {bundle}"
+            ) from exc
 
     rotated_key = _rewrap_key(key, old_passphrase, new_passphrase)
     fingerprint = _validate_new_key(rotated_key, public_bytes, new_passphrase)
@@ -312,7 +314,10 @@ def rotate_passphrase(
         for path, data in replacements.items():
             _atomic_write(path, data)
             changed.append(path)
-        if _validate_new_key(plan.private_key.read_bytes(), public_bytes, new_passphrase) != fingerprint:
+        if (
+            _validate_new_key(plan.private_key.read_bytes(), public_bytes, new_passphrase)
+            != fingerprint
+        ):
             raise RotationError("installed key fingerprint changed unexpectedly")
         for bundle, checksum in plan.custody_bundles:
             installed = bundle.read_bytes()
@@ -345,7 +350,10 @@ def rollback_rotation(journal_path: Path, *, approved: bool = False) -> tuple[st
         journal = json.loads(journal_path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
         raise RotationError(f"invalid rollback journal: {exc}") from exc
-    if not isinstance(journal, dict) or journal.get("schema") != "capauth-passphrase-rotation-rollback-v1":
+    if (
+        not isinstance(journal, dict)
+        or journal.get("schema") != "capauth-passphrase-rotation-rollback-v1"
+    ):
         raise RotationError("unsupported rollback journal")
     items = journal.get("items")
     if not isinstance(items, list) or not items:

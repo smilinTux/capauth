@@ -161,8 +161,12 @@ function renderKeyState() {
     $("key-import").classList.add("hidden");
     $("key-unlock").classList.remove("hidden");
     $("loaded-fp").textContent = fp;
-    setStatus($("key-status"), session.armoredKey ? "Unlocked." : "Locked — unlock to sign.",
-      session.armoredKey ? "ok" : "");
+    const text = session.armoredKey
+      ? "Unlocked."
+      : setupMode
+        ? "Identity ready. Continue to passkey setup."
+        : "Locked. Unlock only when remote signing is needed.";
+    setStatus($("key-status"), text, session.armoredKey || setupMode ? "ok" : "");
   } else {
     $("key-import").classList.remove("hidden");
     $("key-unlock").classList.add("hidden");
@@ -513,6 +517,7 @@ if (setupMode) {
   $("page-title").textContent = "Set up this browser";
   $("page-subtitle").textContent = "Load your existing identity once, then create your passkey.";
   $("pair-card").classList.add("hidden");
+  $("continue-passkey").classList.remove("hidden");
 }
 const fromHash = location.hash.startsWith("#capauth-bunker")
   ? location.hash.slice(1)

@@ -18,5 +18,6 @@ def test_bunker_guides_browser_identity_setup() -> None:
     controller = (ROOT / "phone-signer" / "app.js").read_text()
     assert 'new URLSearchParams(location.search).get("mode") === "setup"' in controller
     assert '$("pair-card").classList.add("hidden")' in controller
+    assert '$("continue-passkey").classList.remove("hidden")' in controller
     assert "vaultPass !== vaultConfirm" in controller
     assert 'requestedNext.startsWith("/")' in controller

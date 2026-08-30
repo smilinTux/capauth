@@ -668,6 +668,42 @@ def test_exact_five_minute_lifetime_is_allowed() -> None:
     assert result.context.expires_at - result.context.issued_at == timedelta(minutes=5)
 
 
+def test_signed_expiry_constraint_is_an_upper_ceiling() -> None:
+    rig = Rig()
+    rig.binding = rig.binding.model_copy(update={"expires_at": NOW + timedelta(seconds=61)})
+
+    result = _allow(rig, bearer=rig.bearer(ttl_seconds=60))
+
+    assert result.context.expires_at == NOW + timedelta(seconds=60)
+    assert result.context.binding.expires_at == result.context.expires_at
+    assert result.context.capauth_decision.scope.constraints == (
+        rig.binding.capability_scope().constraints
+    )
+    assert result.context.joined_decision.scope == result.context.binding.capability_scope()
+
+
+def test_signed_payload_expiry_after_constraint_denies_before_owner_policy() -> None:
+    rig = Rig()
+    rig.binding = rig.binding.model_copy(update={"expires_at": NOW + timedelta(seconds=59)})
+    owner = OwnerPolicy()
+
+    result = rig.authorizer(owner).authorize(rig.bearer(ttl_seconds=60), rig.invocation())
+
+    assert result.code is DecisionCode.CAPAUTH_DENIED
+    assert owner.calls == []
+
+
+def test_signed_expiry_constraint_cannot_exceed_bounded_window() -> None:
+    rig = Rig()
+    rig.binding = rig.binding.model_copy(update={"expires_at": NOW + timedelta(seconds=62)})
+    owner = OwnerPolicy()
+
+    result = rig.authorizer(owner).authorize(rig.bearer(ttl_seconds=60), rig.invocation())
+
+    assert result.code is DecisionCode.CAPAUTH_DENIED
+    assert owner.calls == []
+
+
 @pytest.mark.parametrize(
     "mutate",
     [

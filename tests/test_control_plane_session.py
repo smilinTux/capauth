@@ -59,6 +59,13 @@ class Clock:
         return self.now
 
 
+class AdvancingClock(Clock):
+    def __call__(self):
+        current = self.now
+        self.now += timedelta(microseconds=1)
+        return current
+
+
 class RegistrySigner:
     def __init__(self):
         self._lock = Lock()
@@ -82,14 +89,15 @@ class RegistrySigner:
 
 
 class InjectedIssuer:
-    def __init__(self, issuer):
+    def __init__(self, issuer, *, ttl_delta=0):
         self._issuer = issuer
+        self._ttl_delta = ttl_delta
 
     def issue(self, request):
         return self._issuer.issue_root(
             principal=request.principal,
             scope=request.scope,
-            ttl_seconds=request.ttl_seconds,
+            ttl_seconds=request.ttl_seconds + self._ttl_delta,
         )
 
 
@@ -152,8 +160,16 @@ def new_session(manager, *, device=DEVICE):
     return material.take()
 
 
-def make_rig(backend=None):
-    clock = Clock()
+def make_rig(
+    backend=None,
+    *,
+    clock=None,
+    issuer_clock=None,
+    issuer_ttl_delta=0,
+    configuration=None,
+):
+    clock = clock or Clock()
+    configuration = configuration or config()
     current = {"rev": REV}
     selected_backend = backend or InMemoryOperatorSessionBackendForTests()
     manager = OperatorSessionManager(
@@ -166,8 +182,11 @@ def make_rig(backend=None):
     signer = RegistrySigner()
     factory = InProcessIssuerFactory(
         sessions=manager,
-        config=config(),
-        issuer=InjectedIssuer(CapabilityIssuer(signer, clock=clock)),
+        config=configuration,
+        issuer=InjectedIssuer(
+            CapabilityIssuer(signer, clock=issuer_clock or clock),
+            ttl_delta=issuer_ttl_delta,
+        ),
         enabled=True,
         clock=clock,
     )
@@ -232,6 +251,55 @@ def test_atomic_factory_authorizes_and_returns_only_sanitized_context_and_verifi
     assert verifier.check_before_owner_read(result.context) is DecisionState.ALLOW
     assert verifier.check_after_owner_read(result.context) is DecisionState.ALLOW
     manager.revoke(cookie)
+
+
+def test_atomic_factory_authorizes_with_an_advancing_live_clock():
+    clock = AdvancingClock()
+    _manager, factory, authorizer, _clock, _current, cookie, csrf = make_rig(clock=clock)
+
+    result, verifier = factory.authorize(request(cookie, csrf), authorizer, invocation())
+
+    assert result.allow is True
+    assert verifier is not None
+    verifier.close()
+
+
+def test_atomic_factory_denies_capability_issued_in_the_future():
+    issuer_clock = Clock()
+    issuer_clock.now = NOW + timedelta(seconds=1)
+    _manager, factory, authorizer, _clock, _current, cookie, csrf = make_rig(
+        issuer_clock=issuer_clock
+    )
+
+    result, verifier = factory.authorize(request(cookie, csrf), authorizer, invocation())
+
+    assert result.allow is False
+    assert verifier is None
+
+
+def test_atomic_factory_denies_capability_lifetime_above_requested_ttl():
+    _manager, factory, authorizer, _clock, _current, cookie, csrf = make_rig(issuer_ttl_delta=1)
+
+    result, verifier = factory.authorize(request(cookie, csrf), authorizer, invocation())
+
+    assert result.allow is False
+    assert verifier is None
+
+
+def test_atomic_factory_denies_capability_expiring_after_operator_session():
+    clock = AdvancingClock()
+    configuration = config(ttl_seconds=300)
+    _manager, factory, authorizer, _clock, _current, cookie, csrf = make_rig(
+        clock=clock,
+        configuration=configuration,
+    )
+
+    result, verifier = factory.authorize(
+        request(cookie, csrf), authorizer, invocation(configuration)
+    )
+
+    assert result.allow is False
+    assert verifier is None
 
 
 def test_request_is_one_use_redacted_and_has_no_identity_or_topology_fields():

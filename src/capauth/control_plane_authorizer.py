@@ -47,6 +47,7 @@ from .delegated import (
 UTC = timezone.utc
 MAX_CONTROL_PLANE_BEARER_BYTES = 64 * 1024
 MAX_CONTROL_PLANE_TTL = timedelta(minutes=5)
+MAX_SIGNED_EXPIRY_CEILING_WINDOW = timedelta(seconds=1)
 MAX_CONTROL_PLANE_CURRENTNESS_VERIFIERS = 1024
 
 
@@ -620,7 +621,7 @@ class ControlPlaneDecisionAuthorizer:
 
         request = AuthorizationRequest(
             principal=binding.principal,
-            scope=binding.capability_scope(),
+            scope=leaf.claims.scope,
             correlation_id=invocation.correlation_id,
         )
         try:
@@ -645,7 +646,8 @@ class ControlPlaneDecisionAuthorizer:
             return closed(
                 _result(DecisionState.UNAVAILABLE, DecisionCode.OWNER_POLICY_UNAVAILABLE)
             )
-        first_joined = join_policy_decisions(binding, capauth, first)
+        effective_capauth = capauth.model_copy(update={"scope": binding.capability_scope()})
+        first_joined = join_policy_decisions(binding, effective_capauth, first)
         if not first_joined.allow:
             return closed(_result(first_joined.state, first_joined.code))
         try:
@@ -675,7 +677,8 @@ class ControlPlaneDecisionAuthorizer:
             )
         if first != second:
             return closed(_result(DecisionState.DENY, DecisionCode.BINDING_MISMATCH))
-        joined = join_policy_decisions(binding, capauth, second)
+        effective_capauth = capauth.model_copy(update={"scope": binding.capability_scope()})
+        joined = join_policy_decisions(binding, effective_capauth, second)
         if not joined.allow:
             return closed(_result(joined.state, joined.code))
 
@@ -907,7 +910,10 @@ def _binding_from_leaf(leaf, invocation: ControlPlaneInvocationV1) -> ControlPla
     expires_at = _utc(payload.expires_at)
     if not issued_at < expires_at or expires_at - issued_at > MAX_CONTROL_PLANE_TTL:
         raise ValueError("signed lifetime is invalid")
-    binding = ControlPlaneBinding(
+    constraint_expires_at = _utc(
+        datetime.fromisoformat(values["expires-at"].replace("Z", "+00:00"))
+    )
+    signed_scope_binding = ControlPlaneBinding(
         principal=principal,
         acting_principal_id=values.get("acting-principal"),
         session_jti=values.get("session"),
@@ -922,13 +928,16 @@ def _binding_from_leaf(leaf, invocation: ControlPlaneInvocationV1) -> ControlPla
         resource_type=scope.resource_type,
         resource_id=scope.resource_id,
         owner_policy_revision=values["owner-policy-revision"],
-        expires_at=expires_at,
+        expires_at=constraint_expires_at,
     )
-    if binding.capability_scope() != scope:
+    if signed_scope_binding.capability_scope() != scope:
         raise ValueError("signed scope cannot be reconstructed exactly")
-    if values["expires-at"] != binding.model_dump(mode="json")["expires_at"]:
-        raise ValueError("expiry constraint does not match the signed payload")
-    return binding
+    if (
+        expires_at > constraint_expires_at
+        or constraint_expires_at - expires_at > MAX_SIGNED_EXPIRY_CEILING_WINDOW
+    ):
+        raise ValueError("signed payload exceeds the expiry constraint")
+    return signed_scope_binding.model_copy(update={"expires_at": expires_at})
 
 
 def _constraints(constraints: frozenset[str]) -> dict[str, str]:

@@ -28,6 +28,7 @@ from .control_plane import (
     StrictValue,
 )
 from .control_plane_authorizer import (
+    MAX_SIGNED_EXPIRY_CEILING_WINDOW,
     ControlPlaneAuthorizationResultV1,
     ControlPlaneCurrentnessVerifier,
     ControlPlaneDecisionAuthorizer,
@@ -737,7 +738,11 @@ class InProcessIssuerFactory:
             ):
                 raise ValueError
             now = _utc(self._clock())
-            expires_at = now + timedelta(seconds=self._config.ttl_seconds)
+            expires_at = (
+                now
+                + timedelta(seconds=self._config.ttl_seconds)
+                + MAX_SIGNED_EXPIRY_CEILING_WINDOW
+            )
             if expires_at > session_binding.expires_at:
                 raise ValueError
             binding = ControlPlaneBinding(
@@ -765,7 +770,13 @@ class InProcessIssuerFactory:
             )
             presented = self._issuer.issue(issuance)
             self._sessions.revalidate(session)
-            self._validate_capability(presented, issuance, binding)
+            self._validate_capability(
+                presented,
+                issuance,
+                binding,
+                issued_not_before=now,
+                session_expires_at=session_binding.expires_at,
+            )
             result, inner = authorizer._authorize_presented_with_currentness(
                 presented,
                 invocation,
@@ -802,7 +813,15 @@ class InProcessIssuerFactory:
             and invocation.boundary.origin == config.allowed_origin
         )
 
-    def _validate_capability(self, presented, request, binding) -> None:
+    def _validate_capability(
+        self,
+        presented,
+        request,
+        binding,
+        *,
+        issued_not_before,
+        session_expires_at,
+    ) -> None:
         if not isinstance(presented, PresentedCapability):
             raise ValueError
         chain = tuple(
@@ -830,8 +849,10 @@ class InProcessIssuerFactory:
                 raise ValueError
         payload = leaf.token.payload
         if (
-            payload.issued_at != now
-            or payload.expires_at != binding.expires_at
+            payload.issued_at < issued_not_before
+            or payload.expires_at <= payload.issued_at
+            or payload.expires_at > binding.expires_at
+            or payload.expires_at > session_expires_at
             or payload.expires_at - payload.issued_at > timedelta(seconds=request.ttl_seconds)
         ):
             raise ValueError

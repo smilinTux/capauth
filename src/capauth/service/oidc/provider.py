@@ -595,6 +595,13 @@ _ENROLL_PAGE = """<!DOCTYPE html>
     .msg{{font-size:.85rem;margin-top:.8rem;min-height:1.1rem}}
     .identity{{background:#0f0f1a;border:1px solid #334155;border-radius:8px;padding:.7rem .8rem;
                color:#94a3b8;font-size:.8rem;margin:.8rem 0}}
+    .workflow-step{{border:1px solid #334155;border-radius:10px;padding:.8rem;margin:.7rem 0}}
+    .workflow-step h2{{font-size:.95rem;margin-bottom:.35rem}}
+    .number{{display:inline-block;background:#7C3AED;border-radius:50%;width:1.5rem;height:1.5rem;
+             line-height:1.5rem;text-align:center;margin-right:.4rem}}
+    .setup{{display:inline-block;background:#334155;color:#fff;border-radius:8px;padding:.6rem .8rem;
+            text-decoration:none;font-weight:600;margin-top:.4rem}}
+    button:disabled{{background:#475569;cursor:not-allowed}}
     details{{border-top:1px solid #334155;margin-top:1.1rem;padding-top:.8rem}}
     summary{{color:#a78bfa;cursor:pointer;font-size:.85rem}}
     .ok{{color:#34d399}} .err{{color:#f87171}}
@@ -608,14 +615,29 @@ _ENROLL_PAGE = """<!DOCTYPE html>
      your sovereign PGP identity. Prove your fingerprint with PGP once, then create a passkey for it.
      (Convenience tier — your PGP key stays the root of trust.)</p>
 
-  <div class="identity" id="identity-status">Checking this browser for a CapAuth identity...</div>
-  <button id="ld-enroll" onclick="enrollLocal()" style="background:#10b981">Create passkey with this device</button>
-  <p class="sub" style="font-size:.74rem;margin:.4rem 0 0">If no identity is detected, <a href="{base_url}/bunker/" style="color:#a78bfa">open the Bunker</a>, load your existing identity, then return here.</p>
+  <div class="workflow-step">
+    <h2><span class="number">1</span>Check this browser</h2>
+    <div class="identity" id="identity-status">Checking for your existing CapAuth identity...</div>
+    <a class="setup" id="setup-identity" href="{base_url}/bunker/">Set up this browser</a>
+    <p class="sub" style="font-size:.74rem;margin:.4rem 0 0">You only need to load your existing identity. Do not create a new key.</p>
+  </div>
+
+  <div class="workflow-step">
+    <h2><span class="number">2</span>Create the passkey</h2>
+    <button id="ld-enroll" onclick="enrollLocal()" style="background:#10b981" disabled>Create passkey with this device</button>
+    <p class="sub" style="font-size:.74rem;margin:.4rem 0 0">Unlock your existing identity once, then approve the passkey prompt from your browser or password manager.</p>
+  </div>
+
+  <div class="workflow-step" id="finish-step">
+    <h2><span class="number">3</span>Finish</h2>
+    <p class="sub" id="finish-text" style="margin:0">After creation, return to SKDashboard and choose Sign in with a passkey.</p>
+  </div>
 
   <details id="manual-enrollment">
-    <summary>Advanced: sign a fresh challenge manually</summary>
-    <div class="step">1 - Your PGP fingerprint</div>
-    <input id="fp" maxlength="64" placeholder="ABCDEF0123..." autocomplete="off"/>
+    <summary>Advanced recovery: prove the identity manually</summary>
+    <p class="sub" style="font-size:.74rem;margin:.6rem 0">Use this only when the Bunker cannot be used in this browser. Each challenge expires and needs a fresh signature.</p>
+    <div class="step">1 - PGP fingerprint</div>
+    <input id="fp" maxlength="64" placeholder="Example: 40 or 64 hexadecimal characters" autocomplete="off"/>
     <div class="step">2 - Exact message to sign</div>
     <div class="nonce-box" id="nonce" style="white-space:pre-wrap">Enter your fingerprint to load the complete signed payload.</div>
     <button type="button" onclick="copyPayload()" style="width:auto;padding:.45rem .7rem;font-size:.78rem;background:#334155">Copy message</button>
@@ -635,29 +657,43 @@ const BASE="{base_url}";
 window._capauthBase = BASE;
 let currentNonce=null, currentPayload="";
 function msg(t,ok){{ const e=document.getElementById("msg"); e.textContent=t; e.className="msg "+(ok?"ok":"err"); }}
+function friendlyError(e){{
+  const text=String(e&&e.message||e||"");
+  if(text.includes("passkey_rp_unavailable")) return "Passkey setup is not ready on this server. Ask the administrator to finish the named-host setup.";
+  if(text.includes("fingerprint_not_approved")||text.includes("unknown_fingerprint")) return "This identity is not approved yet. Ask the administrator to enroll its public fingerprint, then try again.";
+  if(text.includes("NotAllowedError")||text.includes("cancel")) return "The passkey prompt was cancelled. Click Create passkey when you are ready and approve the prompt.";
+  return "Passkey creation failed. Open Advanced recovery only if the normal browser setup cannot be used. Details: "+text;
+}}
 function detectLocalIdentity(){{
   const fp=(localStorage.getItem("capauth_bunker_fp")||"").trim().toUpperCase().replace(/\\s/g,"");
   const hasEnvelope=Boolean(localStorage.getItem("capauth_bunker_envelope"));
   const valid=[40,64].includes(fp.length)&&/^[0-9A-F]+$/.test(fp)&&hasEnvelope;
   const status=document.getElementById("identity-status");
+  const setup=document.getElementById("setup-identity");
+  const button=document.getElementById("ld-enroll");
   if(valid){{
     status.textContent="Ready: CapAuth identity "+fp.slice(0,8)+"..."+fp.slice(-8)+" is loaded in this browser.";
     document.getElementById("fp").value=fp;
+    setup.hidden=true;
+    button.disabled=false;
   }}else{{
-    status.textContent="No CapAuth identity is loaded in this browser yet.";
+    status.textContent="Setup needed: load your existing identity in this browser first.";
+    setup.hidden=false;
+    button.disabled=true;
   }}
   return valid;
 }}
 async function enrollLocal(){{
-  if(!window.capauthWebAuthn||!window.capauthWebAuthn.available()) return msg("This browser has no passkey support.",false);
-  if(!window.capauthLocalProof) return msg("Still loading — try again in a second.",false);
+  if(!window.capauthWebAuthn||!window.capauthWebAuthn.available()) return msg("Use a browser or password manager that supports passkeys.",false);
+  if(!window.capauthLocalProof) return msg("The identity helper is still loading. Wait one second, then click again.",false);
   if(!detectLocalIdentity()) return msg("Open the Bunker, load your existing identity, then return here.",false);
-  msg("Unlocking your key + creating passkey…",true);
+  msg("Unlock your identity, then approve the passkey prompt.",true);
   try{{
     const proof=await window.capauthLocalProof(BASE);
     const res=await window.capauthWebAuthn.enroll(BASE,proof);
-    msg("✅ Passkey created for "+res.fingerprint.slice(0,8)+"… — now sign in with it in the Nextcloud app.",true);
-  }}catch(e){{ msg("Failed: "+e.message,false); }}
+    document.getElementById("finish-text").textContent="Passkey created for "+res.fingerprint.slice(0,8)+"... Return to SKDashboard and choose Sign in with a passkey.";
+    msg("Passkey created successfully.",true);
+  }}catch(e){{ msg(friendlyError(e),false); }}
 }}
 async function loadChallenge(fp){{
   const r=await fetch(BASE+"/capauth/v1/challenge",{{method:"POST",headers:{{"Content-Type":"application/json"}},
@@ -700,6 +736,7 @@ async function enroll(){{
   }}catch(e){{ msg("Failed: "+e.message,false); }}
 }}
 detectLocalIdentity();
+document.addEventListener("visibilitychange",function(){{ if(!document.hidden) detectLocalIdentity(); }});
 </script>
 </body>
 </html>

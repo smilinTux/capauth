@@ -36,7 +36,7 @@ from urllib.parse import urlencode, urlsplit
 
 import jwt as pyjwt
 from fastapi import APIRouter, Form, HTTPException, Request
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, RedirectResponse
 
 from ... import resolve_capauth_home
 from ...authentik.claims_mapper import preferred_username_fallback
@@ -101,6 +101,14 @@ def issuer_url() -> str:
         service_id = os.environ.get("CAPAUTH_SERVICE_ID", "capauth.local")
         candidate = os.environ.get("CAPAUTH_BASE_URL", f"https://{service_id}").rstrip("/")
     return _validate_issuer(candidate)
+
+
+def canonical_page_redirect(request: Request, path: str) -> Optional[RedirectResponse]:
+    """Redirect a browser page to the configured issuer origin when needed."""
+    issuer = issuer_url()
+    if f"{request.url.scheme}://{request.url.netloc}" == issuer:
+        return None
+    return RedirectResponse(f"{issuer}{path}", status_code=307)
 
 
 def discovery_document(issuer: Optional[str] = None) -> dict[str, Any]:
@@ -1225,7 +1233,10 @@ def build_oidc_router(
         return {"redirect_to": redirect_to}
 
     @router.get("/passkey/enroll", summary="Passkey enrollment page (PGP-gated)")
-    async def passkey_enroll() -> Any:
+    async def passkey_enroll(request: Request) -> Any:
+        redirect = canonical_page_redirect(request, "/oidc/passkey/enroll")
+        if redirect is not None:
+            return redirect
         _passkey_preflight()
         return HTMLResponse(content=_ENROLL_PAGE.format(base_url=issuer_url()))
 

@@ -278,7 +278,7 @@ def test_login_page_documents_exact_signing_contract(oidc_app):
 def test_passkey_enrollment_page_documents_exact_signing_contract(oidc_app):
     client, _router = oidc_app
 
-    response = client.get("/oidc/passkey/enroll")
+    response = client.get(f"{ISSUER}/oidc/passkey/enroll")
 
     assert response.status_code == 200
     assert 'currentPayload=["CAPAUTH_NONCE_V1", "nonce="+ch.nonce' in response.text
@@ -307,6 +307,17 @@ def test_passkey_enrollment_page_documents_exact_signing_contract(oidc_app):
     assert "passkey_rp_unavailable" in response.text
     assert "fingerprint_not_approved" in response.text
     assert "button.disabled=false" in response.text
+
+
+@pytest.mark.parametrize("origin", ["https://100.81.238.58:8420", "https://unknown.example.test"])
+def test_passkey_enrollment_redirects_noncanonical_origins(oidc_app, origin):
+    client, _router = oidc_app
+
+    response = client.get(f"{origin}/oidc/passkey/enroll", follow_redirects=False)
+
+    assert response.status_code == 307
+    assert response.headers["location"] == f"{ISSUER}/oidc/passkey/enroll"
+    assert "100.81.238.58" not in response.headers["location"]
 
 
 def test_ip_issuer_passkey_preflight_denies_before_pgp_verification(oidc_app, monkeypatch):

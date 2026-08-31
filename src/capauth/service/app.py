@@ -43,6 +43,7 @@ from ..authz import decide as authz_decide
 from .bunker import BunkerBroker, BunkerCapacityError, build_pairing_uri
 from .keystore import KeyStore
 from .oidc import build_oidc_router
+from .oidc.provider import canonical_page_redirect
 from .oidc.provider import discovery_document as _oidc_discovery_document
 from .push import PushRegistry
 
@@ -1644,8 +1645,12 @@ async def bunker_notify(req: PushNotifyRequest, request: Request) -> dict[str, A
 
 @app.get("/bunker/", response_class=HTMLResponse)
 @app.get("/bunker/signer", response_class=HTMLResponse)
-async def phone_signer_page() -> Any:
+async def phone_signer_page(request: Request) -> Any:
     """Serve the phone-signer PWA entry page (mobile-friendly)."""
+    if request.query_params.get("mode") == "setup":
+        redirect = canonical_page_redirect(request, "/bunker/?mode=setup")
+        if redirect is not None:
+            return redirect
     index = _phone_signer_asset("index.html")
     return FileResponse(str(index), media_type="text/html", headers=_PWA_NO_CACHE)
 

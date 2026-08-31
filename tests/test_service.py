@@ -213,6 +213,25 @@ class TestServiceEndpoints:
             assert response.status_code == 200
             assert response.content
 
+    def test_only_bunker_setup_redirects_to_canonical_origin(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """IP setup is canonicalized without changing ordinary Bunker GETs."""
+        issuer = "https://chiap08.tail204f0c.ts.net:8420"
+        monkeypatch.setenv("CAPAUTH_OIDC_ISSUER", issuer)
+
+        setup = self.client.get(
+            "https://100.81.238.58:8420/bunker/?mode=setup", follow_redirects=False
+        )
+        canonical = self.client.get(f"{issuer}/bunker/?mode=setup", follow_redirects=False)
+        ordinary = self.client.get("https://100.81.238.58:8420/bunker/", follow_redirects=False)
+
+        assert setup.status_code == 307
+        assert setup.headers["location"] == f"{issuer}/bunker/?mode=setup"
+        assert "100.81.238.58" not in setup.headers["location"]
+        assert canonical.status_code == 200
+        assert ordinary.status_code == 200
+
     def test_bunker_asset_traversal_is_rejected(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:

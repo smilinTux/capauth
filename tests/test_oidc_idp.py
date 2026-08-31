@@ -307,6 +307,26 @@ def test_passkey_enrollment_page_documents_exact_signing_contract(oidc_app):
     assert "passkey_rp_unavailable" in response.text
     assert "fingerprint_not_approved" in response.text
     assert "button.disabled=false" in response.text
+    assert "Do not use Authy for this step" in response.text
+    assert "Windows Hello" in response.text
+    assert "Google Password Manager" in response.text
+    assert "iCloud Keychain" in response.text
+    assert "/oidc/bunker-login.js?v=16" in response.text
+
+
+def test_local_signing_uses_masked_passphrase_dialog(oidc_app):
+    client, _router = oidc_app
+
+    response = client.get(f"{ISSUER}/oidc/bunker-login.js")
+
+    assert response.status_code == 200
+    assert 'type="password"' in response.text
+    assert 'autocomplete="current-password"' in response.text
+    assert 'aria-label="Show passphrase"' in response.text
+    assert "data-secret-toggle" in response.text
+    assert 'input.type = showing ? "password" : "text"' in response.text
+    assert 'input.value = ""' in response.text
+    assert 'prompt("Vault passphrase' not in response.text
 
 
 @pytest.mark.parametrize("origin", ["https://100.81.238.58:8420", "https://unknown.example.test"])

@@ -50,10 +50,11 @@ async function prepareSigningKey(armored, candidatePass) {
     }
   }
   // Last resort: the key has its own PGP passphrase distinct from the vault.
-  const entered =
-    typeof prompt === "function"
-      ? prompt("This key has a PGP passphrase. Enter it to enable signing:")
-      : "";
+  const entered = await requestMaskedSecret(
+    "Unlock PGP key",
+    "Current key passphrase",
+    "current-password"
+  );
   if (entered) {
     try {
       return await openpgp.decryptKey({ privateKey: key, passphrase: entered });
@@ -69,6 +70,67 @@ const $ = (id) => document.getElementById(id);
 function setStatus(el, text, kind = "") {
   el.textContent = text;
   el.className = "status" + (kind ? " " + kind : "");
+}
+
+function requestMaskedSecret(title, label, autocomplete = "current-password") {
+  return new Promise((resolve) => {
+    const overlay = document.createElement("div");
+    overlay.className = "secret-dialog";
+    overlay.setAttribute("role", "dialog");
+    overlay.setAttribute("aria-modal", "true");
+    overlay.setAttribute("aria-labelledby", "secret-dialog-title");
+    overlay.innerHTML = '<form class="panel"><h3 id="secret-dialog-title"></h3>' +
+      '<label for="secret-dialog-input"></label><div class="secret-field">' +
+      '<input id="secret-dialog-input" type="password" spellcheck="false" autocapitalize="none" />' +
+      '<button type="button" class="secret-toggle" aria-label="Show passphrase" aria-pressed="false">Show</button></div>' +
+      '<div class="row"><button type="submit">Continue</button>' +
+      '<button type="button" class="secondary" data-secret-cancel>Cancel</button></div></form>';
+    const form = overlay.querySelector("form");
+    const input = overlay.querySelector("input");
+    const toggle = overlay.querySelector(".secret-toggle");
+    const cancel = overlay.querySelector("[data-secret-cancel]");
+    overlay.querySelector("h3").textContent = title;
+    overlay.querySelector("label").textContent = label;
+    input.autocomplete = autocomplete;
+    const finish = (value) => {
+      input.value = "";
+      overlay.remove();
+      resolve(value);
+    };
+    toggle.addEventListener("click", () => {
+      const showing = input.type === "text";
+      input.type = showing ? "password" : "text";
+      toggle.textContent = showing ? "Show" : "Hide";
+      toggle.setAttribute("aria-label", (showing ? "Show" : "Hide") + " passphrase");
+      toggle.setAttribute("aria-pressed", String(!showing));
+      input.focus();
+    });
+    form.addEventListener("submit", (event) => {
+      event.preventDefault();
+      finish(input.value || null);
+    });
+    cancel.addEventListener("click", () => finish(null));
+    overlay.addEventListener("keydown", (event) => {
+      if (event.key === "Escape") finish(null);
+    });
+    document.body.appendChild(overlay);
+    input.focus();
+  });
+}
+
+function setSecretVisibility(input, toggle, showing) {
+  input.type = showing ? "text" : "password";
+  toggle.textContent = showing ? "Hide" : "Show";
+  const subject = toggle.getAttribute("aria-label").replace(/^(Show|Hide) /, "");
+  toggle.setAttribute("aria-label", (showing ? "Hide" : "Show") + " " + subject);
+  toggle.setAttribute("aria-pressed", String(showing));
+}
+
+function clearSecret(id) {
+  const input = $(id);
+  input.value = "";
+  const toggle = document.querySelector(`[data-secret-target="${id}"]`);
+  if (toggle) setSecretVisibility(input, toggle, false);
 }
 
 // --- key import / encrypt-at-rest ------------------------------------------
@@ -112,9 +174,9 @@ async function storeKey() {
     localStorage.setItem(STORE_KEY, JSON.stringify(envelope));
     localStorage.setItem(FP_KEY, fp);
     $("priv-key").value = "";
-    $("pgp-pass").value = "";
-    $("vault-pass").value = "";
-    $("vault-pass-confirm").value = "";
+    clearSecret("pgp-pass");
+    clearSecret("vault-pass");
+    clearSecret("vault-pass-confirm");
     setStatus($("key-status"), "Identity saved in this browser. Continue to passkey setup.", "ok");
     renderKeyState();
   } catch (err) {
@@ -136,7 +198,7 @@ async function unlockKey() {
     // not silently at approve-time. This is the bug that made the green button
     // appear to "do nothing": signing a locked key throws.
     session.signingKey = await prepareSigningKey(session.armoredKey, pass);
-    $("unlock-pass").value = "";
+    clearSecret("unlock-pass");
     setStatus($("key-status"), "Unlocked + key ready to sign. Ready to pair.", "ok");
     setStatus($("pair-status"), "Ready — paste the desktop's Bunker URI.");
     $("btn-pair").disabled = false;
@@ -346,7 +408,7 @@ function hideKeyQR() {
   }
   $("qr-box").classList.add("hidden");
   $("qr-img").src = "";
-  $("xfer-pin").value = "";
+  clearSecret("xfer-pin");
 }
 
 // --- Camera QR scan (scan the pairing QR instead of pasting) -----------------
@@ -367,7 +429,11 @@ async function handleScannedKey(payload) {
       return setStatus(ps, "Scanned data wasn't a key.", "err");
     }
     if (!isEncryptedEnvelope(env)) return setStatus(ps, "Scanned data wasn't a key.", "err");
-    const pin = typeof prompt === "function" ? prompt("Enter the Transfer PIN shown on the other device:") : "";
+    const pin = await requestMaskedSecret(
+      "Decrypt transferred key",
+      "Transfer PIN shown on the other device",
+      "one-time-code"
+    );
     if (!pin) return setStatus(ps, "Transfer PIN required to decrypt the scanned key.", "err");
     try {
       armored = await decryptPrivateKey(env, pin);
@@ -504,6 +570,13 @@ $("btn-scan").onclick = startScan;
 $("btn-scan-stop").onclick = stopScan;
 $("btn-show-qr").onclick = showKeyQR;
 $("btn-hide-qr").onclick = hideKeyQR;
+document.querySelectorAll("[data-secret-target]").forEach((toggle) => {
+  const input = $(toggle.dataset.secretTarget);
+  toggle.addEventListener("click", () => {
+    setSecretVisibility(input, toggle, input.type === "password");
+    input.focus();
+  });
+});
 
 // Allow opening with the URI pre-filled: /bunker/?uri=... or #capauth-bunker://
 const fromQuery = new URLSearchParams(location.search).get("uri");
@@ -525,5 +598,5 @@ renderKeyState();
 // any previously-installed (cache-first) worker and installs the network-first
 // one — without this an old SW keeps serving stale cached code forever.
 if ("serviceWorker" in navigator) {
-  navigator.serviceWorker.register("sw.js?v=3").catch(() => {});
+  navigator.serviceWorker.register("sw.js?v=4").catch(() => {});
 }

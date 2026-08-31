@@ -247,7 +247,7 @@ _LOGIN_PAGE = """<!DOCTYPE html>
 
 <script src="{base_url}/oidc/passkey.js?v=15"></script>
 <script src="{base_url}/bunker/vendor/openpgp.min.js"></script>
-<script type="module" src="{base_url}/oidc/bunker-login.js?v=15"></script>
+<script type="module" src="{base_url}/oidc/bunker-login.js?v=16"></script>
 <script>
 const BASE = "{base_url}";
 const REQUEST_ID = "{request_id}";
@@ -435,6 +435,50 @@ import { decryptPrivateKey, isEncryptedEnvelope } from "/bunker/lib/keyvault.js"
   function status(s) { const e = $("pq-status"); if (e) e.textContent = s; }
   function err(m) { const e = $("err"); if (e) { e.textContent = m; e.style.display = "block"; } }
 
+  function requestMaskedPassphrase() {
+    return new Promise((resolve) => {
+      const overlay = document.createElement("div");
+      overlay.setAttribute("role", "dialog");
+      overlay.setAttribute("aria-modal", "true");
+      overlay.setAttribute("aria-labelledby", "capauth-passphrase-title");
+      overlay.style.cssText = "position:fixed;inset:0;z-index:10000;display:flex;align-items:center;justify-content:center;padding:16px;background:rgba(8,8,20,.92)";
+      overlay.innerHTML = '<form style="width:min(420px,100%);padding:22px;border:1px solid #7c3aed;border-radius:16px;background:#1a1a35;color:#e2e8f0">' +
+        '<h2 id="capauth-passphrase-title" style="margin:0 0 12px;font-size:18px">Unlock browser identity</h2>' +
+        '<label for="capauth-passphrase" style="display:block;margin-bottom:6px">Browser vault passphrase</label>' +
+        '<div style="display:flex;gap:8px"><input id="capauth-passphrase" type="password" autocomplete="current-password" spellcheck="false" autocapitalize="none" style="min-width:0;flex:1;padding:10px;border-radius:8px;border:1px solid #7c3aed;background:#0f0f1a;color:#e2e8f0" />' +
+        '<button type="button" data-secret-toggle aria-label="Show passphrase" aria-pressed="false" style="width:auto;padding:10px;border-radius:8px">Show</button></div>' +
+        '<div style="display:flex;gap:8px;margin-top:14px"><button type="submit" style="flex:1;padding:10px;border-radius:8px">Continue</button>' +
+        '<button type="button" data-secret-cancel style="flex:1;padding:10px;border-radius:8px">Cancel</button></div></form>';
+      const form = overlay.querySelector("form");
+      const input = overlay.querySelector("input");
+      const toggle = overlay.querySelector("[data-secret-toggle]");
+      const cancel = overlay.querySelector("[data-secret-cancel]");
+      const finish = (value) => {
+        input.value = "";
+        overlay.remove();
+        resolve(value);
+      };
+      toggle.addEventListener("click", () => {
+        const showing = input.type === "text";
+        input.type = showing ? "password" : "text";
+        toggle.textContent = showing ? "Show" : "Hide";
+        toggle.setAttribute("aria-label", (showing ? "Show" : "Hide") + " passphrase");
+        toggle.setAttribute("aria-pressed", String(!showing));
+        input.focus();
+      });
+      form.addEventListener("submit", (event) => {
+        event.preventDefault();
+        finish(input.value || null);
+      });
+      cancel.addEventListener("click", () => finish(null));
+      overlay.addEventListener("keydown", (event) => {
+        if (event.key === "Escape") finish(null);
+      });
+      document.body.appendChild(overlay);
+      input.focus();
+    });
+  }
+
   async function loadChallengeFor(base, fp) {
     const cn = btoa(String.fromCharCode.apply(null, crypto.getRandomValues(new Uint8Array(16))));
     const r = await fetch(base + "/capauth/v1/challenge", {
@@ -458,7 +502,7 @@ import { decryptPrivateKey, isEncryptedEnvelope } from "/bunker/lib/keyvault.js"
     if (!window.openpgp) return err("OpenPGP not loaded — reload the page.");
     let env; try { env = JSON.parse(raw); } catch (e) { return err("Stored key is corrupt."); }
     if (!isEncryptedEnvelope(env)) return err("Stored key is not a valid vault envelope.");
-    const pass = prompt("Vault passphrase (to unlock your key on this device):");
+    const pass = await requestMaskedPassphrase();
     if (!pass) return;
     try {
       status && status("");
@@ -498,7 +542,7 @@ import { decryptPrivateKey, isEncryptedEnvelope } from "/bunker/lib/keyvault.js"
     if (!window.openpgp) throw new Error("OpenPGP not loaded — reload the page.");
     const env = JSON.parse(raw);
     if (!isEncryptedEnvelope(env)) throw new Error("Stored key is not a valid vault envelope.");
-    const pass = prompt("Vault passphrase (to unlock your key on this device):");
+    const pass = await requestMaskedPassphrase();
     if (!pass) throw new Error("cancelled");
     const armored = await decryptPrivateKey(env, pass);
     let pk = await window.openpgp.readPrivateKey({ armoredKey: armored });
@@ -613,6 +657,8 @@ _ENROLL_PAGE = """<!DOCTYPE html>
     details{{border-top:1px solid #334155;margin-top:1.1rem;padding-top:.8rem}}
     summary{{color:#a78bfa;cursor:pointer;font-size:.85rem}}
     .ok{{color:#34d399}} .err{{color:#f87171}}
+    .notice{{background:#172033;border:1px solid #475569;border-radius:8px;padding:.65rem .75rem;
+             color:#cbd5e1;font-size:.76rem;line-height:1.45;margin-top:.6rem}}
     code{{color:#a78bfa}}
   </style>
 </head>
@@ -634,6 +680,7 @@ _ENROLL_PAGE = """<!DOCTYPE html>
     <h2><span class="number">2</span>Create the passkey</h2>
     <button id="ld-enroll" onclick="enrollLocal()" style="background:#10b981" disabled>Create passkey with this device</button>
     <p class="sub" style="font-size:.74rem;margin:.4rem 0 0">Unlock your existing identity once, then approve the passkey prompt from your browser or password manager.</p>
+    <p class="notice"><strong>Do not use Authy for this step.</strong> Authy imports TOTP codes, not WebAuthn passkeys. Use the passkey dialog opened by this button with Windows Hello, Google Password Manager, iCloud Keychain, or a hardware security key.</p>
   </div>
 
   <div class="workflow-step" id="finish-step">
@@ -659,7 +706,7 @@ _ENROLL_PAGE = """<!DOCTYPE html>
 </div>
 <script src="{base_url}/oidc/passkey.js"></script>
 <script src="{base_url}/bunker/vendor/openpgp.min.js"></script>
-<script type="module" src="{base_url}/oidc/bunker-login.js?v=15"></script>
+<script type="module" src="{base_url}/oidc/bunker-login.js?v=16"></script>
 <script>
 const BASE="{base_url}";
 window._capauthBase = BASE;

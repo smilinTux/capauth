@@ -22,3 +22,23 @@ def test_bunker_guides_browser_identity_setup() -> None:
     assert "vaultPass !== vaultConfirm" in controller
     assert "requestedNext" not in controller
     assert "safeNext" not in controller
+
+
+def test_bunker_masks_every_secret_and_supports_explicit_reveal() -> None:
+    page = (ROOT / "phone-signer" / "index.html").read_text()
+    for field in ("pgp-pass", "vault-pass", "vault-pass-confirm", "xfer-pin", "unlock-pass"):
+        assert f'id="{field}" type="password"' in page
+        assert f'data-secret-target="{field}"' in page
+    assert page.count('spellcheck="false" autocapitalize="none"') >= 5
+    assert page.count('aria-pressed="false">Show</button>') >= 5
+
+    controller = (ROOT / "phone-signer" / "app.js").read_text()
+    assert "function requestMaskedSecret" in controller
+    assert "function setSecretVisibility" in controller
+    assert 'input.type = showing ? "text" : "password"' in controller
+    assert 'prompt("This key has a PGP passphrase' not in controller
+    assert 'prompt("Enter the Transfer PIN' not in controller
+    assert 'register("sw.js?v=4")' in controller
+
+    worker = (ROOT / "phone-signer" / "sw.js").read_text()
+    assert 'const CACHE = "capauth-bunker-v6"' in worker

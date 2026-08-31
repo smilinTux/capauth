@@ -50,6 +50,19 @@
     }
     .row { display:flex; gap:8px; }
     .row button { margin-top:0; }
+    .secret-field { display:flex; gap:8px; align-items:stretch; }
+    .secret-field input { flex:1; min-width:0; }
+    .secret-field .secret-toggle { width:auto; margin-top:0; padding:10px 14px; background:#334155; }
+    .secret-dialog {
+      position:fixed; inset:0; z-index:1100; display:flex; align-items:center;
+      justify-content:center; padding:16px; background:rgba(8,8,20,.92);
+    }
+    .secret-dialog .panel {
+      width:100%; max-width:420px; padding:22px; border:1px solid var(--accent);
+      border-radius:16px; background:var(--card);
+    }
+    .secret-dialog h3 { color:var(--accent2); font-size:16px; margin-bottom:12px; }
+    .secret-dialog .row { margin-top:14px; }
     .status { font-size:12px; color:var(--muted); margin-top:12px; min-height:16px; }
     .status.ok { color:var(--ok); } .status.err { color:var(--err); }
     .hint { font-size:11px; color:var(--muted); margin:6px 0 2px; line-height:1.6; }
@@ -117,12 +130,21 @@
         Paste the complete block, including the BEGIN and END lines.
       </details>
       <label for="pgp-pass">Current key passphrase</label>
-      <input id="pgp-pass" type="password" autocomplete="off" placeholder="Leave blank if the key has no passphrase" />
+      <div class="secret-field">
+        <input id="pgp-pass" type="password" autocomplete="current-password" spellcheck="false" autocapitalize="none" placeholder="Leave blank if the key has no passphrase" />
+        <button type="button" class="secret-toggle" data-secret-target="pgp-pass" aria-label="Show current key passphrase" aria-pressed="false">Show</button>
+      </div>
       <div class="hint">This is used once to unlock the imported key. It is not stored.</div>
       <label for="vault-pass">Choose a browser vault passphrase</label>
-      <input id="vault-pass" type="password" autocomplete="new-password" placeholder="Use a long phrase you can re-enter" />
+      <div class="secret-field">
+        <input id="vault-pass" type="password" autocomplete="new-password" spellcheck="false" autocapitalize="none" placeholder="Use a long phrase you can re-enter" />
+        <button type="button" class="secret-toggle" data-secret-target="vault-pass" aria-label="Show browser vault passphrase" aria-pressed="false">Show</button>
+      </div>
       <label for="vault-pass-confirm">Enter the browser vault passphrase again</label>
-      <input id="vault-pass-confirm" type="password" autocomplete="new-password" />
+      <div class="secret-field">
+        <input id="vault-pass-confirm" type="password" autocomplete="new-password" spellcheck="false" autocapitalize="none" />
+        <button type="button" class="secret-toggle" data-secret-target="vault-pass-confirm" aria-label="Show repeated browser vault passphrase" aria-pressed="false">Show</button>
+      </div>
       <div class="hint">You will enter this phrase when CapAuth needs to prove your identity. It never leaves this browser.</div>
       <button id="btn-store">Save identity in this browser</button>
       <details class="hint">
@@ -130,8 +152,11 @@
         Paste your key above, set a transfer PIN, then show a QR your other device
         scans with its camera — no clipboard, no cloud, and the QR disappears when
         you're done. (Big RSA keys animate across several frames; keep scanning.)
-        <label>Transfer PIN (encrypts the QR)</label>
-        <input id="xfer-pin" type="password" autocomplete="off" />
+        <label for="xfer-pin">Transfer PIN (encrypts the QR)</label>
+        <div class="secret-field">
+          <input id="xfer-pin" type="password" autocomplete="one-time-code" spellcheck="false" autocapitalize="none" />
+          <button type="button" class="secret-toggle" data-secret-target="xfer-pin" aria-label="Show transfer PIN" aria-pressed="false">Show</button>
+        </div>
         <button id="btn-show-qr">Show QR</button>
         <div id="qr-box" class="hidden">
           <div class="warn" id="qr-warn"></div>
@@ -147,7 +172,10 @@
       <details class="hint" id="signer-controls">
       <summary>Advanced: unlock for remote signing</summary>
       <label for="unlock-pass">Browser vault passphrase</label>
-      <input id="unlock-pass" type="password" autocomplete="current-password" />
+      <div class="secret-field">
+        <input id="unlock-pass" type="password" autocomplete="current-password" spellcheck="false" autocapitalize="none" />
+        <button type="button" class="secret-toggle" data-secret-target="unlock-pass" aria-label="Show browser vault passphrase" aria-pressed="false">Show</button>
+      </div>
       <div class="row">
         <button id="btn-unlock">Unlock</button>
         <button id="btn-forget" class="secondary">Forget key</button>
@@ -194,6 +222,6 @@
        + not subject to a blocked/served-from-3rd-party CDN). -->
   <script src="vendor/openpgp.min.js"></script>
   <script src="vendor/qrcode-generator.js"></script>
-  <script type="module" src="app.js?v=3"></script>
+  <script type="module" src="app.js?v=4"></script>
 </body>
 </html>

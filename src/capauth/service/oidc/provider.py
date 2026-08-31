@@ -185,6 +185,10 @@ _LOGIN_PAGE = """<!DOCTYPE html>
                 white-space:pre-wrap;word-break:break-all}}
     .copy{{width:auto;padding:.45rem .7rem;font-size:.78rem;background:#334155;margin-bottom:1rem}}
     .err{{color:#f87171;font-size:.85rem;margin-top:.6rem;display:none}}
+    .browser-auth{{background:#111827;border:1px solid #334155;border-radius:10px;padding:1rem;margin:1rem 0}}
+    .browser-auth button+button{{margin-top:.6rem}}
+    details{{margin-top:1rem}}
+    summary{{cursor:pointer;color:#a78bfa;font-weight:600}}
     code{{color:#a78bfa}}
   </style>
 </head>
@@ -199,10 +203,16 @@ _LOGIN_PAGE = """<!DOCTYPE html>
     <a href="{base_url}/oidc/passkey/enroll" style="color:#a78bfa">Add a passkey</a>
   </p>
 
-  <div style="display:flex;align-items:center;gap:.6rem;margin:0 0 1rem;color:#475569;font-size:.74rem">
-    <span style="flex:1;height:1px;background:#334155"></span>PGP FALLBACK<span style="flex:1;height:1px;background:#334155"></span>
+  <div class="browser-auth">
+    <div class="step">Recommended browser sign-in</div>
+    <button id="ld-btn" onclick="capauthLocalSign()" style="background:#10b981">Sign in on this browser</button>
+    <button id="setup-btn" onclick="setupBrowser()" style="background:#334155">Set up this browser once</button>
+    <p class="sub" id="browser-status" style="font-size:.74rem;margin:.6rem 0 0">Checking this browser for your encrypted identity.</p>
   </div>
 
+  <details id="manual-pgp">
+  <summary>Advanced: sign manually or from another device</summary>
+  <p class="sub" style="font-size:.74rem;margin:.6rem 0">The text below is the message to sign. It is not a signature. Paste only a fresh ASCII-armored PGP signature into the signature box.</p>
   <div class="step">1 — Your PGP fingerprint</div>
   <label for="fp">Fingerprint (40- or 64-hex chars)</label>
   <input id="fp" type="text" maxlength="64" placeholder="ABCDEF0123..." autocomplete="off"/>
@@ -218,12 +228,7 @@ _LOGIN_PAGE = """<!DOCTYPE html>
   <p class="sub">This fingerprint must already have an approved CapAuth enrollment.</p>
 
   <button onclick="submitSig()">Verify &amp; Continue</button>
-  <div class="err" id="err"></div>
 
-  <div style="display:flex;align-items:center;gap:.6rem;margin:1.1rem 0 .2rem;color:#475569;font-size:.74rem">
-    <span style="flex:1;height:1px;background:#334155"></span>OR<span style="flex:1;height:1px;background:#334155"></span>
-  </div>
-  <button id="ld-btn" onclick="capauthLocalSign()" style="background:#10b981;margin-top:.5rem">Sign on this device (key in your bunker)</button>
   <button id="ph-btn" onclick="capauthPhoneLogin()" style="background:#7C3AED;margin-top:.5rem">Sign from another device (QR)</button>
   <div id="pq" style="display:none;margin-top:1rem;text-align:center">
     <img id="pq-img" alt="pairing QR" style="width:200px;height:200px;background:#fff;border-radius:10px"/>
@@ -235,6 +240,8 @@ _LOGIN_PAGE = """<!DOCTYPE html>
     Manual GPG: copy the complete message, then use <code>gpg --armor --sign</code> for an inline signed message
     or <code>gpg --armor --detach-sign</code> for a detached signature. The browser extension can sign automatically.
   </p>
+  </details>
+  <div class="err" id="err"></div>
 </div>
 
 <script src="{base_url}/oidc/passkey.js?v=15"></script>
@@ -244,6 +251,31 @@ _LOGIN_PAGE = """<!DOCTYPE html>
 const BASE = "{base_url}";
 const REQUEST_ID = "{request_id}";
 window._capauthBase = BASE; window._capauthReqId = REQUEST_ID; window._capauthCh = null;
+
+function setupBrowser(){{
+  const target=window.location.pathname+window.location.search;
+  if(target.length>2048||/[\\u0000-\\u001F\\u007F]/.test(target)||window.location.pathname!=="/oidc/authorize"){{
+    return setErr("This sign-in address cannot be carried into browser setup. Start again from the application.");
+  }}
+  sessionStorage.setItem("capauth_bunker_return",target);
+  sessionStorage.setItem("capauth_bunker_auto_sign","1");
+  window.location.assign(BASE+"/bunker/?mode=setup");
+}}
+
+function refreshBrowserAuth(){{
+  const fp=(localStorage.getItem("capauth_bunker_fp")||"").trim().toUpperCase().replace(/\\s/g,"");
+  const ready=[40,64].includes(fp.length)&&/^[0-9A-F]+$/.test(fp)&&Boolean(localStorage.getItem("capauth_bunker_envelope"));
+  const status=document.getElementById("browser-status");
+  const setup=document.getElementById("setup-btn");
+  if(ready){{
+    status.textContent="Ready as "+fp.slice(0,8)+"..."+fp.slice(-8)+". Your encrypted key stays in this browser.";
+    setup.hidden=true;
+  }}else{{
+    status.textContent="First time only: load your existing identity, then CapAuth returns here and signs a fresh challenge.";
+    setup.hidden=false;
+  }}
+}}
+refreshBrowserAuth();
 
 async function passkeyLogin(){{
   document.getElementById("err").style.display="none";
@@ -569,6 +601,16 @@ import { decryptPrivateKey, isEncryptedEnvelope } from "/bunker/lib/keyvault.js"
       window.location.href = d.redirect_to;
     } catch (e) { err("Phone sign-in: " + e.message); status(""); }
   };
+
+  // The one-time Bunker setup can return to a fresh OIDC authorization page
+  // and immediately continue the local signing flow. The marker is removed
+  // before prompting so cancel or failure never creates a reload loop.
+  if (window._capauthReqId && sessionStorage.getItem("capauth_bunker_auto_sign") === "1") {
+    sessionStorage.removeItem("capauth_bunker_auto_sign");
+    const fp = (localStorage.getItem("capauth_bunker_fp") || "").toUpperCase();
+    const raw = localStorage.getItem("capauth_bunker_envelope");
+    if ([40, 64].includes(fp.length) && raw) setTimeout(window.capauthLocalSign, 0);
+  }
 })();
 """
 

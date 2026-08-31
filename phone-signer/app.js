@@ -19,6 +19,28 @@ import { chunkPayload, parseKeyFrame, KeyFrameCollector } from "./lib/keyqr.js";
 const openpgp = globalThis.openpgp;
 const STORE_KEY = "capauth_bunker_envelope";
 const FP_KEY = "capauth_bunker_fp";
+const RETURN_KEY = "capauth_bunker_return";
+
+function safeSetupReturn() {
+  const raw = sessionStorage.getItem(RETURN_KEY) || "";
+  sessionStorage.removeItem(RETURN_KEY);
+  if (!raw || raw.length > 2048 || /[\u0000-\u001F\u007F]/.test(raw)) return "";
+  try {
+    const target = new URL(raw, location.origin);
+    if (
+      target.origin !== location.origin ||
+      target.username ||
+      target.password ||
+      target.hash ||
+      target.pathname !== "/oidc/authorize"
+    ) {
+      return "";
+    }
+    return target.pathname + target.search;
+  } catch {
+    return "";
+  }
+}
 
 const session = {
   armoredKey: null, // decrypted (from vault) armored key, in-memory only
@@ -117,6 +139,8 @@ async function storeKey() {
     $("vault-pass-confirm").value = "";
     setStatus($("key-status"), "Identity saved in this browser. Continue to passkey setup.", "ok");
     renderKeyState();
+    const returnTo = safeSetupReturn();
+    if (returnTo) location.assign(returnTo);
   } catch (err) {
     setStatus($("key-status"), "Could not read/store key: " + err.message, "err");
   }

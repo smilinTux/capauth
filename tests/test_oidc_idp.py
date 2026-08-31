@@ -271,7 +271,13 @@ def test_login_page_documents_exact_signing_contract(oidc_app):
     assert "gpg --armor --sign" in resp.text
     assert "gpg --armor --detach-sign" in resp.text
     assert "capauth sign --nonce" not in resp.text
-    assert "Sign on this device (key in your bunker)" in resp.text
+    assert "Sign in on this browser" in resp.text
+    assert "Set up this browser once" in resp.text
+    assert '<details id="manual-pgp">' in resp.text
+    assert "The text below is the message to sign. It is not a signature." in resp.text
+    assert 'window.location.pathname!=="/oidc/authorize"' in resp.text
+    assert 'sessionStorage.setItem("capauth_bunker_return",target)' in resp.text
+    assert 'sessionStorage.setItem("capauth_bunker_auto_sign","1")' in resp.text
     assert "Sign from another device (QR)" in resp.text
 
 

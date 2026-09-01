@@ -6,3 +6,9 @@ __pycache__
 browser-extension/node_modules
 tests
 docs
+# Stale local pip build artifact (root-owned; not part of the image, and its
+# perms can break the docker build-context read). The image installs capauth
+# from source via pip in stage 2, not from this dir.
+build/
+# Stray 37MB file accidentally committed at repo root; never needed in the image.
+urllib.error

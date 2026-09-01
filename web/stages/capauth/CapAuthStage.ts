@@ -303,3 +303,11 @@ declare global {
     "ak-stage-capauth": CapAuthStage;
   }
 }
+
+// Authentik's FlowExecutor stage resolver does `module.default` then
+// `customElements.getName(module.default)` to find the registered tag. It
+// therefore requires the stage class to be the module's DEFAULT export — a
+// named export alone leaves `module.default` undefined and throws
+// "Failed to execute 'getName' on 'CustomElementRegistry': parameter 1 is not
+// of type 'Function'". (Stock Authentik stages all default-export their class.)
+export default CapAuthStage;

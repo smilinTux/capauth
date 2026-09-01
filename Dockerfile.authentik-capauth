@@ -2,12 +2,18 @@
 #  Custom Authentik image with CapAuth PGP passwordless stage
 #  Adds: Python backend (Django app) + Lit web component (frontend)
 #
-#  Build:
+#  Build (cap11 registers ak-stage-capauth in the flow STAGE REGISTRY so the
+#  FlowExecutor can DISPATCH to it — fixes the browser "No stage found for
+#  component: ak-stage-capauth" that remained after cap10 compiled the component
+#  in but never added it to StageEntries; cap10 restored the from-source web
+#  component; cap9 had shipped the stock frontend without it):
 #    docker build -f Dockerfile.authentik-capauth \
+#      -t ghcr.io/smilintux/authentik-capauth:2026.5.3-cap11 \
 #      -t ghcr.io/smilintux/authentik-capauth:2026.5.3 \
 #      -t ghcr.io/smilintux/authentik-capauth:latest .
 #
 #  Push:
+#    docker push ghcr.io/smilintux/authentik-capauth:2026.5.3-cap11
 #    docker push ghcr.io/smilintux/authentik-capauth:2026.5.3
 #    docker push ghcr.io/smilintux/authentik-capauth:latest
 #
@@ -29,25 +35,71 @@ RUN apt-get update && apt-get install -y --no-install-recommends git && \
 
 WORKDIR /build/authentik/web
 
-# Install web dependencies with `npm ci` so we get the EXACT versions Authentik's
-# lockfile pins. `npm install` resolves newer minor versions (notably of Lit), which
-# breaks esbuild's chunk splitting at runtime — the built bundle ends up with a chunk
-# that imports `createRef` from a sibling chunk that doesn't re-export it
-# ("does not provide an export named 'createRef'"), so the whole SPA fails to boot
-# (live-proven on .13: blank loading spinner, backend/API fine). Our CapAuth component
-# only uses deps Authentik already ships, so `npm ci` needs no lockfile regeneration.
-RUN npm ci --ignore-engines 2>&1 || npm install --ignore-engines 2>&1
+# Install web dependencies with `npm ci` (NOT `npm install`). `npm ci` installs the EXACT
+# versions Authentik's committed lockfile pins, which guarantees a SINGLE `lit` / `lit-html`
+# instance in node_modules. `npm install` is free to resolve newer minor versions and can pull
+# a SECOND copy of `lit-html` — and because Authentik's own source mixes `import … from "lit"`
+# and `import … from "lit-html"` (35 files), two `lit-html` identities split the `createRef`/
+# `ref` directive across esbuild chunks. With `splitting:true` the minified prod bundle then
+# emits a chunk that imports `createRef` (minified `e`) from a sibling chunk that doesn't
+# re-export it → runtime "does not provide an export named 'createRef'" → blank SPA. `npm ci`
+# against the pinned lockfile (one lit-html@3.x) does NOT trigger this; the from-source build
+# is clean (verified: 0 missing cross-chunk exports across the minified prod dist, cap10).
+# Our CapAuth component only uses deps Authentik already ships, so no lockfile regeneration.
+RUN npm ci --ignore-engines 2>&1
 
 # Copy CapAuth stage web component into the Authentik web tree
 COPY web/stages/capauth/ /build/authentik/web/src/flow/stages/capauth/
 
-# Register the component in the flow entrypoint
+# Register the component in the flow entrypoint. This DEFINES the
+# `ak-stage-capauth` custom element (necessary) but is NOT sufficient on its own
+# — see the FlowExecutor registry patch below (cap11).
 RUN echo '' >> src/flow/index.entrypoint.ts && \
     echo '// CapAuth PGP passwordless stage' >> src/flow/index.entrypoint.ts && \
     echo 'import "#flow/stages/capauth/CapAuthStage";' >> src/flow/index.entrypoint.ts
 
-# Build the frontend (esbuild via npm run build)
-RUN npm run build
+# cap11 FIX — register ak-stage-capauth in the flow STAGE REGISTRY so the
+# FlowExecutor can DISPATCH to it. In 2026.5.x the executor has no hard-coded
+# `switch (challenge.component)`; web/src/flow/FlowExecutor.ts:renderChallenge()
+# does `StageMapping.registry.get(challenge.component)` and renders
+# "No stage found for component: <name>" when the component is absent from the
+# registry. `StageMapping.registry` (FlowExecutorStageFactory.ts) is built from
+# the `StageEntries` array in web/src/flow/FlowExecutorStages.ts. cap10 shipped
+# the COMPONENT but never added the registry ENTRY, so the browser showed
+# "No stage found for component: ak-stage-capauth" even though the server flow
+# executor returned that exact component. This Node patch inserts the missing
+# entry, mirroring the stock ak-stage-identification / ak-stage-password entries
+# ({ stage, fetch: () => import(...) }, default "standard" prop variant). The
+# script is idempotent and exits non-zero (failing the build) if upstream moved
+# the StageEntries anchor. We then GREP-ASSERT the entry is present so a silent
+# no-op can never ship a broken executor.
+RUN node src/flow/stages/capauth/patch-stage-registry.mjs src/flow/FlowExecutorStages.ts && \
+    grep -q 'stage: "ak-stage-capauth"' src/flow/FlowExecutorStages.ts && \
+    echo "✅ ak-stage-capauth registered in StageEntries (source)"
+
+# Build the frontend. NODE_ENV=production matches the OFFICIAL Authentik image build
+# (minified bundle), so the resulting /web/dist is a drop-in replacement for the stock one.
+# `build` emits admin/user/flow/rac/standalone/styles/poly + chunks; `build:sfe` emits the
+# legacy Simple-Flow-Executor (dist/sfe) that the stock image also ships — together they make
+# the rebuilt /web/dist complete (only diff vs stock is the added ak-stage-capauth component).
+RUN NODE_ENV=production npm run build && \
+    NODE_ENV=production npm run build:sfe && \
+    test -f dist/sfe/index.js && \
+    grep -rl ak-stage-capauth dist/flow >/dev/null && echo "✅ ak-stage-capauth component present in /web/dist/flow" && \
+    # cap11 DISPATCH ASSERTION — prove the STAGE REGISTRY ENTRY (not just the
+    # component) survived bundling. The patched StageEntries array compiles into
+    # whichever flow chunk holds FlowExecutorStages; that entry is the ONLY place
+    # the literal "ak-stage-capauth" sits right next to a dynamic import() of the
+    # CapAuthStage chunk. We require a single bundled JS file in dist/flow where
+    # "ak-stage-capauth" and `import(` co-occur within a 200-char window (the
+    # minified `{stage:"ak-stage-capauth",fetch:()=>import("./CapAuthStage-….js")}`
+    # record). If only the component chunk existed (cap10), this would NOT match,
+    # because @customElement("ak-stage-capauth") has no adjacent dynamic import.
+    DISPATCH_FILE="$(grep -rlE 'ak-stage-capauth' dist/flow | while read f; do \
+        if grep -oE '.{0,120}ak-stage-capauth.{0,120}' "$f" | grep -q 'import('; then echo "$f"; fi; \
+      done | head -1)" && \
+    test -n "$DISPATCH_FILE" && \
+    echo "✅ ak-stage-capauth DISPATCH (registry entry + dynamic import) present in: $DISPATCH_FILE"
 
 # ── Stage 2: Final custom Authentik image ────────────────────────────
 FROM ghcr.io/goauthentik/server:${AK_VERSION}
@@ -70,21 +122,28 @@ RUN VENV_SP="$(ls -d /ak-root/.venv/lib/python3.*/site-packages | head -1)" && \
     cp /app/capauth/authentik-custom/imghdr.py "$VENV_SP/imghdr.py" && \
     PYTHONPATH="$VENV_SP" python3 -c "import imghdr; assert hasattr(imghdr,'what'); print('imghdr shim OK')"
 
-# NOTE: the from-source web rebuild (web-builder stage) is DISABLED. Building Authentik's
-# web bundle with `npm run build` hits an esbuild code-splitting bug — a shared chunk defines
-# `createRef` (Lit) but doesn't re-export it across the chunk boundary, so the runtime SPA
-# throws "does not provide an export named 'createRef'" and never boots (blank spinner;
-# identical output under npm ci AND npm install, so it's not version drift — it's the
-# from-source build itself). Authentik's OFFICIAL image ships a correctly pre-built bundle,
-# so we keep the stock /web/dist. Trade-off: the `ak-stage-capauth` browser web component is
-# absent, so the PGP login *form* won't render in-browser — but the CapAuth backend stage and
-# its flow-executor API work fully (passwordless PGP auth is API-proven). Re-enable this COPY
-# only once the from-source web build is fixed (correct esbuild chunking for the custom stage).
-# COPY --from=web-builder /build/authentik/web/dist/ /web/dist/
+# Install the rebuilt frontend that INCLUDES the ak-stage-capauth web component AND
+# registers it in the flow stage registry so the executor dispatches to it (cap11).
+# cap9 shipped the stock /web/dist because an earlier from-source attempt hit the esbuild
+# code-splitting bug (a chunk imports `createRef`/`e` that a sibling chunk doesn't re-export
+# → blank SPA). Root cause was a SECOND `lit-html` copy from `npm install`; building with
+# `npm ci` against the pinned lockfile keeps a single lit-html and the bug does NOT occur.
+# The web-builder stage's prod (minified) dist was verified to have 0 missing cross-chunk
+# exports AND to contain ak-stage-capauth, so we restore the from-source /web/dist here.
+# Without this COPY the flow executor cannot render the PGP challenge in a browser.
+COPY --from=web-builder /build/authentik/web/dist/ /web/dist/
 
 # Add Django app registration via Authentik's user_settings hook
 # Authentik loads this at startup: _update_settings("data.user_settings")
 COPY authentik-custom/user_settings.py /data/user_settings.py
+
+# Bake the CapAuth PGP-login blueprint into the image. Authentik's WORKER auto-discovers and
+# applies *.yaml under /blueprints/ on startup, so every install gets the CapAuthStage instance
+# + a "CapAuth PGP Login" authentication flow out of the box (label
+# blueprints.goauthentik.io/instantiate: "true"). The capauth app is registered in TENANT_APPS
+# (user_settings.py) and its API URLs are auto-mounted via capauth/urls.py:api_urlpatterns, so
+# the stage is also admin/API-manageable at /api/v3/stages/capauth/.
+COPY src/capauth/authentik/blueprints/capauth-pgp-login.yaml /blueprints/capauth/capauth-pgp-login.yaml
 
 # NB: NO custom /lifecycle/system_migrations/capauth_migrate.py. user_settings.py registers
 # capauth in TENANT_APPS, so Authentik's normal `ak migrate` already migrates the capauth app
@@ -94,6 +153,8 @@ COPY authentik-custom/user_settings.py /data/user_settings.py
 
 # Fix permissions (authentik runs as uid 1000)
 RUN chown 1000:1000 /data/user_settings.py && \
-    chmod 644 /data/user_settings.py
+    chmod 644 /data/user_settings.py && \
+    chown -R 1000:1000 /blueprints/capauth && \
+    chmod 644 /blueprints/capauth/capauth-pgp-login.yaml
 
 USER authentik

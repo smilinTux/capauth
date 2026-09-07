@@ -6,6 +6,9 @@ All notable changes to `capauth` are documented here. The format is based on
 
 ## [Unreleased]
 
+- Raise operator proof absolute and idle ceilings to 24 hours while keeping
+  access capabilities bounded to five minutes (card `4af0ae7f`).
+
 - Normalize control-plane authorization decisions to the actual reconstructed
   token lifetime before exact owner-policy evaluation, while retaining the raw
   signed decision for replay and currentness receipts (card `9b0c6dce`).

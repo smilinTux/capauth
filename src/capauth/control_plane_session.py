@@ -38,8 +38,8 @@ from .control_plane_authorizer import (
 from .delegated import CapabilityScope, PresentedCapability, Principal, parse_presented_token
 
 UTC = timezone.utc
-MAX_SESSION_TTL = timedelta(hours=8)
-MAX_SESSION_IDLE = timedelta(minutes=30)
+MAX_SESSION_TTL = timedelta(hours=24)
+MAX_SESSION_IDLE = timedelta(hours=24)
 _OPS = {entry.capability: entry.operation.value for entry in CAPABILITY_MATRIX if entry.capability}
 _REQUEST_FACTORY = object()
 _VERIFIER_FACTORY = object()

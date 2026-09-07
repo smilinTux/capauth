@@ -162,6 +162,30 @@ def new_session(manager, *, device=DEVICE):
     return material.take()
 
 
+def test_operator_session_accepts_24_hour_absolute_and_idle_lifetime():
+    manager = OperatorSessionManager(
+        backend=InMemoryOperatorSessionBackendForTests(),
+        current_revisions=lambda _: REV,
+        enabled=True,
+        clock=Clock(),
+    )
+
+    cookie, csrf = manager.create(
+        principal=P,
+        acting_principal=A,
+        device_fingerprint=DEVICE,
+        capability_ceiling=frozenset({"skdashboard.read"}),
+        purpose="reporting",
+        allowed_origin=ORIGIN,
+        revisions=REV,
+        ttl_seconds=24 * 60 * 60,
+        idle_seconds=24 * 60 * 60,
+    ).take()
+
+    assert cookie
+    assert csrf
+
+
 def make_rig(
     backend=None,
     *,

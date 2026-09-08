@@ -169,14 +169,44 @@ async function unlockKey() {
   }
 }
 
-function forgetKey() {
+function clearLocalIdentity(message) {
   localStorage.removeItem(STORE_KEY);
   localStorage.removeItem(FP_KEY);
   session.armoredKey = null;
   session.signingKey = null;
   session.fingerprint = "";
   renderKeyState();
-  setStatus($("key-status"), "Key forgotten.", "");
+  setStatus($("key-status"), message, "");
+}
+
+function forgetKey() {
+  if (!confirm("Remove this encrypted identity from this browser? Make sure you have another protected copy first.")) return;
+  clearLocalIdentity("Identity removed from this browser.");
+}
+
+function replaceKey() {
+  if (!confirm("Replace this browser's encrypted identity? Make sure you have another protected copy first.")) return;
+  clearLocalIdentity("Choose the identity file you want to use on this browser.");
+}
+
+function downloadEncryptedBackup() {
+  const envelope = localStorage.getItem(STORE_KEY);
+  const fingerprint = localStorage.getItem(FP_KEY);
+  if (!envelope || !fingerprint) return setStatus($("key-status"), "No local identity is available to back up.", "err");
+  try {
+    const parsed = JSON.parse(envelope);
+    if (!isEncryptedEnvelope(parsed)) throw new Error("invalid encrypted vault");
+    const payload = JSON.stringify({ version: 1, fingerprint, encryptedEnvelope: parsed }, null, 2);
+    const url = URL.createObjectURL(new Blob([payload], { type: "application/json" }));
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `capauth-${fingerprint.slice(-8).toLowerCase()}-encrypted-backup.json`;
+    link.click();
+    URL.revokeObjectURL(url);
+    setStatus($("key-status"), "Encrypted backup downloaded. Store it somewhere protected.", "ok");
+  } catch (err) {
+    setStatus($("key-status"), "Could not create the encrypted backup: " + err.message, "err");
+  }
 }
 
 function renderKeyState() {
@@ -194,7 +224,7 @@ function renderKeyState() {
   } else {
     $("key-import").classList.remove("hidden");
     $("key-unlock").classList.add("hidden");
-    setStatus($("key-status"), "Setup needed: choose your existing identity file.");
+    setStatus($("key-status"), "Setup needed: choose your existing identity or encrypted backup file.");
   }
 }
 
@@ -203,8 +233,23 @@ async function loadKeyFile() {
   if (!file) return;
   try {
     const armored = await file.text();
+    if (file.name.toLowerCase().endsWith(".json")) {
+      const backup = JSON.parse(armored);
+      const fp = String(backup.fingerprint || "").trim().toUpperCase();
+      if (backup.version !== 1 || ![40, 64].includes(fp.length) || !/^[0-9A-F]+$/.test(fp)) {
+        throw new Error("This is not a valid CapAuth encrypted backup.");
+      }
+      if (!isEncryptedEnvelope(backup.encryptedEnvelope)) throw new Error("The encrypted vault is invalid.");
+      localStorage.setItem(STORE_KEY, JSON.stringify(backup.encryptedEnvelope));
+      localStorage.setItem(FP_KEY, fp);
+      setStatus($("key-status"), "Encrypted identity restored. Use its browser vault passphrase to sign in.", "ok");
+      renderKeyState();
+      const returnTo = safeSetupReturn();
+      if (returnTo) location.assign(returnTo);
+      return;
+    }
     if (!armored.includes("BEGIN PGP PRIVATE KEY BLOCK")) {
-      throw new Error("This is not an armored PGP private key file.");
+      throw new Error("Choose an armored PGP private key or CapAuth encrypted backup.");
     }
     $("priv-key").value = armored;
     setStatus($("key-status"), "Identity file loaded. Complete the two passphrase fields below.", "ok");
@@ -522,6 +567,8 @@ $("btn-store").onclick = storeKey;
 $("key-file").onchange = loadKeyFile;
 $("btn-unlock").onclick = unlockKey;
 $("btn-forget").onclick = forgetKey;
+$("btn-replace").onclick = replaceKey;
+$("btn-backup").onclick = downloadEncryptedBackup;
 $("btn-pair").onclick = connect;
 $("btn-push").onclick = enablePush;
 $("btn-scan").onclick = startScan;

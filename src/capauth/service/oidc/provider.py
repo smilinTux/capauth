@@ -177,16 +177,18 @@ _LOGIN_PAGE = """<!DOCTYPE html>
                     color:#e2e8f0;padding:.6rem .8rem;font-size:.88rem;margin-bottom:1rem;
                     font-family:monospace}}
     textarea{{min-height:130px;resize:vertical}}
-    button{{width:100%;background:#7C3AED;color:#fff;border:none;border-radius:8px;
-            padding:.8rem;font-size:1rem;cursor:pointer;font-weight:600}}
+    button{{width:100%;background:#7C3AED;color:#fff;border:none;border-radius:10px;
+            padding:.85rem;font-size:1rem;cursor:pointer;font-weight:650}}
     button:hover{{background:#6d28d9}}
     .nonce-box{{background:#0f0f1a;border:1px solid #334155;border-radius:8px;padding:.7rem;
                 margin-bottom:.5rem;font-family:monospace;font-size:.78rem;color:#00e5ff;
                 white-space:pre-wrap;word-break:break-all}}
     .copy{{width:auto;padding:.45rem .7rem;font-size:.78rem;background:#334155;margin-bottom:1rem}}
     .err{{color:#f87171;font-size:.85rem;margin-top:.6rem;display:none}}
-    .browser-auth{{background:#111827;border:1px solid #334155;border-radius:10px;padding:1rem;margin:1rem 0}}
+    .browser-auth{{background:#111827;border:1px solid #334155;border-radius:12px;padding:1rem;margin:1rem 0}}
     .browser-auth button+button{{margin-top:.6rem}}
+    .method-label{{color:#c4b5fd;font-size:.72rem;font-weight:700;letter-spacing:.06em;text-transform:uppercase;margin-bottom:.65rem}}
+    .secondary-action{{background:#334155}}
     details{{margin-top:1rem}}
     summary{{cursor:pointer;color:#a78bfa;font-weight:600}}
     code{{color:#a78bfa}}
@@ -198,20 +200,17 @@ _LOGIN_PAGE = """<!DOCTYPE html>
   <p class="sub">Authenticate to <strong>{client_name}</strong> with your PGP key.
      No password. Use a passkey if you already added one.</p>
 
-  <button id="pk-btn" onclick="passkeyLogin()" style="background:#0e7490">Sign in with a passkey</button>
-  <p class="sub" style="font-size:.74rem;margin:.4rem 0 1rem">Recommended after one PGP-proven enrollment. Passkey login then needs no fingerprint or pasted signature.
-    <a href="{base_url}/oidc/passkey/enroll" style="color:#a78bfa">Add a passkey</a>
-  </p>
-
   <div class="browser-auth">
-    <div class="step">Recommended browser sign-in</div>
-    <button id="ld-btn" onclick="capauthLocalSign()" style="background:#10b981">Sign in on this browser</button>
-    <button id="setup-btn" onclick="setupBrowser()" style="background:#334155">Set up this browser once</button>
+    <div class="method-label" id="primary-label">Best option for this browser</div>
+    <button id="pk-btn" onclick="passkeyLogin()" style="background:#0e7490">Continue with a passkey</button>
+    <button id="ld-btn" onclick="capauthLocalSign()" style="background:#10b981">Continue with local identity</button>
+    <button id="setup-btn" onclick="setupBrowser()" style="background:#7C3AED">Set up this browser</button>
     <p class="sub" id="browser-status" style="font-size:.74rem;margin:.6rem 0 0">Checking this browser for your encrypted identity.</p>
+    <a href="{base_url}/oidc/passkey/enroll" id="add-passkey" style="display:block;color:#a78bfa;font-size:.76rem;margin-top:.7rem">Add a passkey to this browser</a>
   </div>
 
   <details id="manual-pgp">
-  <summary>Advanced: sign manually or from another device</summary>
+  <summary>Other sign-in and recovery options</summary>
   <p class="sub" style="font-size:.74rem;margin:.6rem 0">The text below is the message to sign. It is not a signature. Paste only a fresh ASCII-armored PGP signature into the signature box.</p>
   <div class="step">1 — Your PGP fingerprint</div>
   <label for="fp">Fingerprint (40- or 64-hex chars)</label>
@@ -267,12 +266,15 @@ function refreshBrowserAuth(){{
   const ready=[40,64].includes(fp.length)&&/^[0-9A-F]+$/.test(fp)&&Boolean(localStorage.getItem("capauth_bunker_envelope"));
   const status=document.getElementById("browser-status");
   const setup=document.getElementById("setup-btn");
+  const local=document.getElementById("ld-btn");
   if(ready){{
-    status.textContent="Ready as "+fp.slice(0,8)+"..."+fp.slice(-8)+". Your encrypted key stays in this browser.";
+    status.textContent="Local identity "+fp.slice(0,8)+"..."+fp.slice(-8)+" is ready. Its encrypted key stays in this browser.";
     setup.hidden=true;
+    local.hidden=false;
   }}else{{
-    status.textContent="First time only: load your existing identity, then CapAuth returns here and signs a fresh challenge.";
+    status.textContent="No local identity was found. Load your existing identity once, then CapAuth returns here to sign a fresh challenge.";
     setup.hidden=false;
+    local.hidden=true;
   }}
 }}
 refreshBrowserAuth();

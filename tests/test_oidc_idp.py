@@ -261,8 +261,8 @@ def test_login_page_documents_exact_signing_contract(oidc_app):
     )
 
     assert resp.status_code == 200
-    assert ">Sign in with a passkey<" in resp.text
-    assert "Recommended after one PGP-proven enrollment" in resp.text
+    assert ">Continue with a passkey<" in resp.text
+    assert "Best option for this browser" in resp.text
     assert 'currentPayload=["CAPAUTH_NONCE_V1", "nonce="+ch.nonce' in resp.text
     assert '"client_nonce="+ch.client_nonce_echo' in resp.text
     assert '"timestamp="+ch.timestamp' in resp.text
@@ -271,8 +271,10 @@ def test_login_page_documents_exact_signing_contract(oidc_app):
     assert "gpg --armor --sign" in resp.text
     assert "gpg --armor --detach-sign" in resp.text
     assert "capauth sign --nonce" not in resp.text
-    assert "Sign in on this browser" in resp.text
-    assert "Set up this browser once" in resp.text
+    assert "Continue with local identity" in resp.text
+    assert "Set up this browser" in resp.text
+    assert "Other sign-in and recovery options" in resp.text
+    assert "local.hidden=true" in resp.text
     assert '<details id="manual-pgp">' in resp.text
     assert "The text below is the message to sign. It is not a signature." in resp.text
     assert 'window.location.pathname!=="/oidc/authorize"' in resp.text

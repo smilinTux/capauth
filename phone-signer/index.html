@@ -94,6 +94,8 @@
       max-height:140px; overflow:auto; margin-top:6px;
     }
     .warn { color:#f59e0b; font-size:11px; margin-top:8px; }
+    .management { border-top:1px solid rgba(124,58,237,.25); margin-top:16px; padding-top:12px; }
+    .management summary { cursor:pointer; color:var(--accent2); font-size:12px; font-weight:600; }
   </style>
 </head>
 <body>
@@ -107,9 +109,9 @@
     <h2>1. Load your existing identity</h2>
     <div id="key-status" class="status">Checking this browser...</div>
     <div id="key-import">
-      <label for="key-file">Choose your armored PGP private key file</label>
-      <input id="key-file" type="file" accept=".asc,.pgp,.gpg,text/plain" />
-      <div class="hint">Example: <code>jarvis-private.asc</code>. The file is read only in this browser and is never uploaded.</div>
+      <label for="key-file">Choose your identity file</label>
+      <input id="key-file" type="file" accept=".asc,.pgp,.gpg,.json,text/plain,application/json" />
+      <div class="hint">Use an armored PGP private key such as <code>jarvis-private.asc</code>, or a CapAuth encrypted backup. The file is read only in this browser and is never uploaded.</div>
       <details class="hint">
         <summary>Advanced: paste an armored key instead</summary>
         <label for="priv-key">Armored PGP private key</label>
@@ -150,10 +152,16 @@
       <input id="unlock-pass" type="password" autocomplete="current-password" />
       <div class="row">
         <button id="btn-unlock">Unlock</button>
-        <button id="btn-forget" class="secondary">Forget key</button>
       </div>
       <button id="btn-push" class="secondary">🔔 Enable background approvals</button>
       <div id="push-status" class="hint">Get a notification to approve sign-ins even when this page is closed.</div>
+      </details>
+      <details class="management" id="device-management">
+        <summary>Manage identity on this device</summary>
+        <p class="hint">Download an encrypted browser-vault backup, replace this browser's identity, or remove its local copy. CapAuth never exports an unencrypted private key here.</p>
+        <button id="btn-backup" class="secondary">Download encrypted backup</button>
+        <button id="btn-replace" class="secondary">Replace identity</button>
+        <button id="btn-forget" class="danger">Remove from this browser</button>
       </details>
     </div>
   </section>

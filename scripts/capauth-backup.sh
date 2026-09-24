@@ -152,8 +152,16 @@ backup_keystore() {
                 # Online backup: consistent snapshot of a live DB, source untouched.
                 sqlite3 "$DB_PATH" ".backup '$dst'"
             else
-                warn "sqlite3 not found; falling back to cp (best-effort consistency)"
-                cp -p "$DB_PATH" "$dst"
+                log "sqlite3 CLI not found; using Python SQLite online backup"
+                python3 - "$DB_PATH" "$dst" <<'PY'
+import sqlite3
+import sys
+
+source, destination = sys.argv[1:]
+with sqlite3.connect(f"file:{source}?mode=ro", uri=True) as live:
+    with sqlite3.connect(destination) as backup:
+        live.backup(backup)
+PY
             fi
             chmod 600 "$dst"
             manifest "keys.db: source=$DB_PATH bytes=$(stat -c%s "$dst" 2>/dev/null || stat -f%z "$dst") sha256=$(sha "$dst")"

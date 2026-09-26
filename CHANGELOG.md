@@ -6,6 +6,14 @@ All notable changes to `capauth` are documented here. The format is based on
 
 ## [Unreleased]
 
+- Deprecate the standalone public verification-service deployment mode
+  (`deploy/capauth-service/`, `deploy/forgejo-capauth/`,
+  `ghcr.io/smilintux/capauth`), documented and decided 2026-09-26: capauth
+  runs on localhost as the existing loopback authz PDP (SOP.md Scenario A).
+  PGP passwordless login for apps is covered by
+  `ghcr.io/smilintux/authentik-capauth` instead. No code deleted, no
+  behavior changed, docs and deprecation notices only.
+
 - Raise operator proof absolute and idle ceilings to 24 hours while keeping
   access capabilities bounded to five minutes (card `4af0ae7f`).
 

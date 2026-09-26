@@ -280,7 +280,16 @@ scenario as a description of your box.
 - **Self-report / liveness:** `GET /capauth/v1/status` (`app.py:395`).
   **There is no `/health` route.** Do not add one to a monitor config expecting 200.
 
-#### Scenario B (optional, repo-provided): standalone container
+#### Scenario B (DEPRECATED 2026-09-26, repo-provided): standalone container
+
+**DEPRECATED.** Chef decided 2026-09-26: capauth runs as the loopback PDP in
+Scenario A; this standalone, publicly-exposable verification-service mode is
+not how capauth is deployed. It carried zero real traffic in the 7 days
+before the `capauth-prod` stack that ran it was decommissioned, and no
+Forgejo/Nextcloud/Immich integration was ever wired up to it. PGP
+passwordless login for apps is covered by `ghcr.io/smilintux/authentik-capauth`
+(an Authentik stage, via sksso) instead. The files below are kept as-is
+(not deleted, not changed in behavior) for anyone who still wants this shape.
 
 `deploy/capauth-service/docker-compose.yml` publishes `${CAPAUTH_PORT:-8420}:8420`
 from `ghcr.io/smilintux/capauth:latest`, with a healthcheck that curls

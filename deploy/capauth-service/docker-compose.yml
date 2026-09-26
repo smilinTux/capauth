@@ -1,4 +1,13 @@
-# CapAuth Verification Service — standalone deployment
+# DEPRECATED (2026-09-26): this is the standalone public verification-service
+# deployment mode. Chef decided 2026-09-26 that capauth runs on localhost as
+# the existing loopback authz PDP (systemd --user unit, see SOP.md Scenario
+# A); this compose file's exposed-container mode is not how capauth is
+# deployed in prod. PGP passwordless login for apps is covered by
+# ghcr.io/smilintux/authentik-capauth (an Authentik stage, via sksso) instead.
+# Kept as-is for anyone who still wants this standalone shape; not removed,
+# not changed in behavior.
+#
+# CapAuth Verification Service, standalone deployment
 #
 # Deploys the capauth-service on port 8420.
 # No dependency on Authentik or any upstream IdP.

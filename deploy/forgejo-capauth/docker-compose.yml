@@ -1,3 +1,11 @@
+# DEPRECATED (2026-09-26): this example builds and runs the standalone public
+# CapAuth verification-service container. Chef decided 2026-09-26 that
+# capauth runs on localhost as the existing loopback authz PDP (systemd
+# --user unit, see SOP.md Scenario A); the standalone verification-service
+# mode this example uses is deprecated. PGP passwordless login for apps is
+# covered by ghcr.io/smilintux/authentik-capauth (an Authentik stage, via
+# sksso) instead. Kept as-is; not removed, not changed in behavior.
+#
 # CapAuth + Forgejo: Passwordless PGP Login for Sovereign Git
 #
 # Quick start:

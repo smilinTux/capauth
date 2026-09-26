@@ -1,3 +1,13 @@
+# DEPRECATED (2026-09-26): this image builds the standalone CapAuth
+# verification-service container (published as ghcr.io/smilintux/capauth),
+# used only by deploy/capauth-service/ and deploy/forgejo-capauth/. Chef
+# decided 2026-09-26 that capauth runs on localhost as the existing loopback
+# authz PDP (systemd --user unit, see SOP.md Scenario A); the standalone
+# public verification-service mode this image serves is deprecated. PGP
+# passwordless login for apps is covered by
+# ghcr.io/smilintux/authentik-capauth (Dockerfile.authentik-capauth, a
+# different image) instead. Not deleted, not changed in behavior: it still
+# builds and runs the same as before.
 FROM python:3.12-slim
 
 WORKDIR /app

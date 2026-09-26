@@ -135,7 +135,7 @@ service/node signers separately; do not use public sync as private-key recovery.
 | **Pluggable crypto** | Two backends — `pgpy` (pure-Python default) and `gnupg` (system keyring / hardware tokens) |
 | **DID (three tiers)** | W3C DID documents: `did:key` (zero-infra), `did:web` mesh (Tailscale-private), `did:web` public (skworld.io). **Library / MCP surface, not a CLI command:** `capauth.did.DIDDocumentGenerator`, or skcapstone's `did_show` / `did_publish` MCP tools |
 | **Agent-identity resolver** | The single canonical `resolve_agent_identity()` — dual URI (`capauth:<a>@skworld.io` + FQID `<a>@<op>.<realm>`) that every SK package delegates to |
-| **Verification service** | A FastAPI service that turns a signed challenge into OIDC claims — passwordless PGP login for any OIDC app (`capauth-service`) |
+| **Verification service** | A FastAPI service that turns a signed challenge into OIDC claims, passwordless PGP login for any OIDC app (`capauth-service`). Runs in prod today as a loopback authz PDP, not the standalone public mode below.[^deprecated-standalone] |
 | **Peer mesh** | Discover and verify sovereign peers over mDNS, shared filesystem, and Syncthing — no servers (`capauth mesh`, `discover`, `peers`) |
 | **PMA membership** | Fiducia Communitatis — PGP-signed, steward-countersigned membership claims (`capauth pma request/approve/verify/revoke`) |
 | **Delegated capabilities** | Strict complete-chain validation with current issuer, principal, revocation, replay, attenuation, exact-scope, and sanitized-decision interfaces (`capauth.delegated`) |
@@ -143,6 +143,14 @@ service/node signers separately; do not use public sync as private-key recovery.
 | **Org registry** | Register with a sovereign org; emits a signed registry entry + PMA request (`capauth register`) |
 | **Integration generators** | One-shot config for third-party login, e.g. Forgejo OAuth2/OIDC (`capauth setup forgejo`) |
 | **skcapstone adapter** | Default-on-by-presence: routes auth events to `sk-alert`, registers a key-rotation check with `skscheduler` |
+
+[^deprecated-standalone]: **DEPRECATED (2026-09-26):** the standalone, publicly-exposable
+    verification-service container (`deploy/capauth-service/`,
+    `ghcr.io/smilintux/capauth`) is deprecated. Chef decided 2026-09-26 that
+    capauth runs on localhost as the existing loopback authz PDP (see
+    [SOP.md](SOP.md) section 5, Scenario A); PGP passwordless login for apps
+    is covered by `ghcr.io/smilintux/authentik-capauth` (an Authentik stage,
+    via sksso) instead. The deprecated files are kept as-is, not removed.
 
 ### Challenge TTL and replay contract (`identity.verify_challenge`)
 

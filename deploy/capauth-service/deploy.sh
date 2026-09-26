@@ -1,4 +1,12 @@
 #!/usr/bin/env bash
+# DEPRECATED (2026-09-26): drives the standalone public verification-service
+# container (docker-compose.yml in this directory). Chef decided 2026-09-26
+# that capauth runs on localhost as the existing loopback authz PDP (systemd
+# --user unit, see SOP.md Scenario A); this standalone mode is deprecated.
+# PGP passwordless login for apps is covered by
+# ghcr.io/smilintux/authentik-capauth (an Authentik stage, via sksso) instead.
+# Kept as-is; not removed, not changed in behavior.
+#
 # CapAuth Verification Service - local deploy + smoke test
 #
 # Usage:

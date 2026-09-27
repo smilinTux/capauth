@@ -466,7 +466,17 @@ import { decryptPrivateKey, isEncryptedEnvelope } from "/bunker/lib/keyvault.js"
   // null when the user cancels. Built with DOM APIs only (no innerHTML).
   function askPassphrase(error) {
     return new Promise((resolve) => {
+      if (!document.getElementById("cap-pass-style")) {
+        // The page's CSS reset zeroes <dialog> margins (so it pinned top-left) and
+        // ::backdrop cannot be set inline, so both live in one scoped stylesheet.
+        const css = document.createElement("style");
+        css.id = "cap-pass-style";
+        css.textContent = "dialog.cap-pass{margin:auto;inset:0;position:fixed}" +
+          "dialog.cap-pass::backdrop{background:rgba(2,6,23,.72);backdrop-filter:blur(3px)}";
+        document.head.append(css);
+      }
       const dlg = document.createElement("dialog");
+      dlg.className = "cap-pass";
       dlg.setAttribute("aria-labelledby", "cap-pass-title");
       dlg.style.cssText = "border:1px solid #334155;border-radius:14px;padding:1.3rem 1.4rem;" +
         "background:#0f172a;color:#e2e8f0;width:min(92vw,380px);box-shadow:0 20px 60px rgba(0,0,0,.6)";

@@ -349,3 +349,94 @@ def test_token_ttl_above_five_minutes_fails_closed(hardened, monkeypatch):
         503,
         "configuration_unavailable",
     )
+
+
+# ---------------------------------------------------------------------------
+# Per-client nonce policy. Stock Authentik's OAuth source never sends an OIDC
+# ``nonce`` (it relies on state + PKCE S256 + a confidential client), so a
+# client may opt out with ``require_nonce: false``. The default stays
+# mandatory, and a nonce that IS sent must still be well formed.
+# ---------------------------------------------------------------------------
+
+
+def _no_nonce_client(hardened):
+    hardened.registry._clients["authentik-source"] = OIDCClient(
+        client_id="authentik-source",
+        client_secret=SECRET,
+        redirect_uris=[REDIRECT],
+        scopes=["openid", "profile", "email"],
+        require_nonce=False,
+    )
+
+
+def test_default_client_still_requires_nonce(hardened):
+    params = _authorization_params()
+    del params["nonce"]
+    response = hardened.client.get("/oidc/authorize", params=params)
+    assert response.status_code == 400
+    assert response.json()["detail"] == "invalid_nonce"
+
+
+def test_client_without_nonce_requirement_completes_code_flow(hardened):
+    _no_nonce_client(hardened)
+    params = _authorization_params(client_id="authentik-source")
+    del params["nonce"]
+    response = hardened.client.get("/oidc/authorize", params=params)
+    assert response.status_code == 200, response.text
+    request_id = response.text.split('REQUEST_ID = "', 1)[1].split('"', 1)[0]
+    code = _code(_complete(hardened.client, request_id))
+    tokens = hardened.client.post(
+        "/oidc/token",
+        data={
+            "grant_type": "authorization_code",
+            "code": code,
+            "redirect_uri": REDIRECT,
+            "client_id": "authentik-source",
+            "client_secret": SECRET,
+            "code_verifier": VERIFIER,
+        },
+    )
+    assert tokens.status_code == 200, tokens.text
+    claims = pyjwt.decode(
+        tokens.json()["id_token"],
+        hardened.signing_key.public_pem,
+        algorithms=["RS256"],
+        audience="authentik-source",
+    )
+    assert claims["sub"] == FINGERPRINT
+    assert "nonce" not in claims
+
+
+def test_optional_nonce_when_sent_must_still_be_well_formed(hardened):
+    _no_nonce_client(hardened)
+    response = hardened.client.get(
+        "/oidc/authorize", params=_authorization_params(client_id="authentik-source", nonce="short")
+    )
+    assert response.status_code == 400
+    assert response.json()["detail"] == "invalid_nonce"
+
+
+def test_optional_nonce_client_still_requires_pkce_and_state(hardened):
+    _no_nonce_client(hardened)
+    for override, detail in (
+        ({"code_challenge": ""}, "invalid_code_challenge"),
+        ({"state": ""}, "invalid_state"),
+    ):
+        params = _authorization_params(client_id="authentik-source", **override)
+        del params["nonce"]
+        response = hardened.client.get("/oidc/authorize", params=params)
+        assert response.status_code == 400
+        assert response.json()["detail"] == detail
+
+
+def test_registry_reads_require_nonce_from_config(monkeypatch):
+    monkeypatch.delenv("CAPAUTH_OIDC_CLIENTS_FILE", raising=False)
+    monkeypatch.setenv(
+        "CAPAUTH_OIDC_CLIENTS_JSON",
+        '[{"client_id": "a", "client_secret": "s", "redirect_uris": ["https://a.test/cb"],'
+        ' "require_nonce": false}, {"client_id": "b", "client_secret": "s",'
+        ' "redirect_uris": ["https://b.test/cb"]}]',
+    )
+    registry = ClientRegistry()
+    assert registry.get("a").require_nonce is False
+    assert registry.get("b").require_nonce is True

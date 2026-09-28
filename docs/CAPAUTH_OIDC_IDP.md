@@ -175,9 +175,16 @@ Add an entry to your CapAuth client registry for Authentik:
   "client_secret": "<long-random-secret>",
   "redirect_uris": ["https://<authentik-host>/source/oauth/callback/capauth/"],
   "name": "Authentik",
-  "scopes": ["openid", "profile", "email", "groups"]
+  "scopes": ["openid", "profile", "email", "groups"],
+  "require_nonce": false
 }
 ```
+
+`require_nonce: false` is needed because Authentik's OAuth source never sends
+an OIDC `nonce` (checked against Authentik 2025.12). Without it `/oidc/authorize`
+answers `400 invalid_nonce`. The flow stays bound by `state`, PKCE S256 and the
+client secret. Set the source's **PKCE** field to **S256** (Authentik 2025.2+;
+older Authentik has no source PKCE and cannot use this IdP).
 
 > The redirect URI Authentik uses for an OAuth source is
 > `https://<authentik-host>/source/oauth/callback/<source-slug>/`. If you name

@@ -410,7 +410,8 @@ def test_client_without_nonce_requirement_completes_code_flow(hardened):
 def test_optional_nonce_when_sent_must_still_be_well_formed(hardened):
     _no_nonce_client(hardened)
     response = hardened.client.get(
-        "/oidc/authorize", params=_authorization_params(client_id="authentik-source", nonce="short")
+        "/oidc/authorize",
+        params=_authorization_params(client_id="authentik-source", nonce="short"),
     )
     assert response.status_code == 400
     assert response.json()["detail"] == "invalid_nonce"

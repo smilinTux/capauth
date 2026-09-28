@@ -6,6 +6,10 @@ All notable changes to `capauth` are documented here. The format is based on
 
 ## [Unreleased]
 
+- Service image builds from a plain checkout again: the Dockerfile takes
+  `--build-arg CAPAUTH_VERSION=<version>` (default `0.0.0+docker`) for
+  setuptools-scm, because `.dockerignore` keeps `.git` out of the context.
+
 - OIDC IdP: a static client may set `require_nonce: false` so stock
   Authentik's OAuth source, which never sends an OIDC `nonce`, can use the
   authorization code flow. State, PKCE S256 and the confidential client secret

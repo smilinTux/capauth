@@ -17,10 +17,16 @@ Each client entry:
       "client_secret": "change-me",
       "redirect_uris": ["https://authentik.example/source/oauth/callback/capauth/"],
       "name": "Authentik",
-      "scopes": ["openid", "profile", "email", "groups"]
+      "scopes": ["openid", "profile", "email", "groups"],
+      "require_nonce": true
     }
 
 ``redirect_uris`` is matched EXACTLY (no wildcard) per OAuth2 security guidance.
+
+``require_nonce`` (default true) may be set to false for a relying party that
+never sends an OIDC ``nonce``, such as stock Authentik's OAuth source. The code
+flow stays bound by state, PKCE S256 and the confidential client secret; a
+nonce that is sent must still be well formed and is echoed in the ID token.
 """
 
 from __future__ import annotations
@@ -44,6 +50,7 @@ class OIDCClient:
     redirect_uris: list[str]
     name: str = ""
     scopes: list[str] = field(default_factory=lambda: list(DEFAULT_SCOPES))
+    require_nonce: bool = True
 
     def redirect_uri_allowed(self, redirect_uri: str) -> bool:
         """Return True if *redirect_uri* exactly matches a registered URI."""
@@ -93,6 +100,7 @@ class ClientRegistry:
             redirect_uris=list(entry.get("redirect_uris", [])),
             name=entry.get("name", entry["client_id"]),
             scopes=list(entry.get("scopes", DEFAULT_SCOPES)),
+            require_nonce=entry.get("require_nonce", True) is not False,
         )
 
     # ------------------------------------------------------------------

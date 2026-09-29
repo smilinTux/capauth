@@ -16,6 +16,10 @@ COPY src/ ./src/
 # resolves these relative to the package root → /app/phone-signer.
 COPY phone-signer/ ./phone-signer/
 
+# The build context has no .git (.dockerignore), so setuptools-scm cannot
+# derive a version: pass one with --build-arg CAPAUTH_VERSION=<version>.
+ARG CAPAUTH_VERSION=0.0.0+docker
+ENV SETUPTOOLS_SCM_PRETEND_VERSION=${CAPAUTH_VERSION}
 RUN pip install --no-cache-dir -e ".[service]"
 RUN pip install --no-cache-dir python-multipart>=0.0.6
 

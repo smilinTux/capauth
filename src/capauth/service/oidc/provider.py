@@ -1067,7 +1067,7 @@ def build_oidc_router(
             raise HTTPException(status_code=400, detail="invalid_code_challenge")
         if not (_OPAQUE_MIN_LENGTH <= len(state) <= 512):
             raise HTTPException(status_code=400, detail="invalid_state")
-        if not (_OPAQUE_MIN_LENGTH <= len(nonce) <= 512):
+        if (nonce or client.require_nonce) and not (_OPAQUE_MIN_LENGTH <= len(nonce) <= 512):
             raise HTTPException(status_code=400, detail="invalid_nonce")
         scopes = scope.split()
         if (

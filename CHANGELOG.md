@@ -6,6 +6,12 @@ All notable changes to `capauth` are documented here. The format is based on
 
 ## [Unreleased]
 
+- Release tags (`v*`) now also publish the service image
+  `ghcr.io/smilintux/capauth:<version>` (`.github/workflows/image.yml`): the
+  tag must be on main, a published version is never overwritten, the image is
+  smoke-tested (`capauth --version`, `/capauth/v1/status`) before the push,
+  and the job summary records the digest to pin (`<version>@sha256:...`).
+
 - Service image builds from a plain checkout again: the Dockerfile takes
   `--build-arg CAPAUTH_VERSION=<version>` (default `0.0.0+docker`) for
   setuptools-scm, because `.dockerignore` keeps `.git` out of the context.

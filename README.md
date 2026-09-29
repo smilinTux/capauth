@@ -191,6 +191,7 @@ capauth pqc-report                           # live PQC posture per surface
 
 # Auth & integration
 capauth login <service_url> [--no-claims]    # passwordless PGP login (caches OIDC token)
+capauth sign-challenge                        # sign the copied browser login challenge, paste the result
 capauth setup forgejo --capauth-url <url>    # generate Forgejo OIDC app.ini block
 
 # Mesh & membership
@@ -231,6 +232,7 @@ rides in the payload `event` field so routing stays severity-based.
 | **[Integration Blueprint](docs/INTEGRATION_BLUEPRINT.md)** | third-party integration guide |
 | **[Cold-Machine Bootstrap & DR](docs/COLD_MACHINE_BOOTSTRAP_AND_DR.md)** | standing capauth back up on a blank box + disaster recovery: the restore-not-regenerate rule, the ordered restore chain, and the operator checklist |
 | **[authentik-capauth](docs/authentik-capauth.md)** | the custom Authentik image with the CapAuth PGP stage baked in — build (`AK_VERSION`, version-agnostic venv install, frontend rebuild), SKStacks deploy + `lifecycle.migrate` override, and the four build/migrate gotchas |
+| **[Sign a login: copy, sign, paste](docs/SIGN_CHALLENGE.md)** | `capauth sign-challenge`: the four-step browser login with your gpg key, one-time setup, desktop shortcut |
 | **[AI Advocate](AI-ADVOCATE.md)** | how AI advocates manage a sovereign profile on your behalf |
 
 ## Why it matters

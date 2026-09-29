@@ -461,6 +461,89 @@ import { decryptPrivateKey, isEncryptedEnvelope } from "/bunker/lib/keyvault.js"
   function status(s) { const e = $("pq-status"); if (e) e.textContent = s; }
   function err(m) { const e = $("err"); if (e) { e.textContent = m; e.style.display = "block"; } }
 
+  // Masked, in-page passphrase dialog. window.prompt() cannot mask input, so it
+  // echoed the vault passphrase in clear text. Resolves to the passphrase, or
+  // null when the user cancels. Built with DOM APIs only (no innerHTML).
+  function askPassphrase(error) {
+    return new Promise((resolve) => {
+      if (!document.getElementById("cap-pass-style")) {
+        // The page's CSS reset zeroes <dialog> margins (so it pinned top-left) and
+        // ::backdrop cannot be set inline, so both live in one scoped stylesheet.
+        const css = document.createElement("style");
+        css.id = "cap-pass-style";
+        css.textContent = "dialog.cap-pass{margin:auto;inset:0;position:fixed}" +
+          "dialog.cap-pass::backdrop{background:rgba(2,6,23,.72);backdrop-filter:blur(3px)}";
+        document.head.append(css);
+      }
+      const dlg = document.createElement("dialog");
+      dlg.className = "cap-pass";
+      dlg.setAttribute("aria-labelledby", "cap-pass-title");
+      dlg.style.cssText = "border:1px solid #334155;border-radius:14px;padding:1.3rem 1.4rem;" +
+        "background:#0f172a;color:#e2e8f0;width:min(92vw,380px);box-shadow:0 20px 60px rgba(0,0,0,.6)";
+      const form = document.createElement("form");
+      form.method = "dialog";
+      const title = document.createElement("h2");
+      title.id = "cap-pass-title";
+      title.textContent = "Unlock your identity";
+      title.style.cssText = "margin:0 0 .35rem;font-size:1.05rem";
+      const hint = document.createElement("p");
+      hint.textContent = "Enter the browser vault passphrase you chose when you set up this browser.";
+      hint.style.cssText = "margin:0 0 .9rem;font-size:.82rem;color:#94a3b8";
+      const input = document.createElement("input");
+      input.type = "password";
+      input.autocomplete = "current-password";
+      input.setAttribute("aria-label", "Vault passphrase");
+      input.required = true;
+      input.style.cssText = "width:100%;box-sizing:border-box;padding:.65rem .75rem;border-radius:9px;" +
+        "border:1px solid #475569;background:#020617;color:#e2e8f0;font-size:1rem";
+      const problem = document.createElement("p");
+      problem.setAttribute("role", "alert");
+      problem.textContent = error || "";
+      problem.style.cssText = "margin:.55rem 0 0;font-size:.8rem;color:#f87171;min-height:1em";
+      const row = document.createElement("div");
+      row.style.cssText = "display:flex;gap:.6rem;justify-content:flex-end;margin-top:1rem";
+      const cancel = document.createElement("button");
+      cancel.type = "button";
+      cancel.textContent = "Cancel";
+      cancel.style.cssText = "background:transparent;color:#cbd5e1;border:1px solid #475569;" +
+        "border-radius:9px;padding:.55rem 1rem;cursor:pointer";
+      const ok = document.createElement("button");
+      ok.type = "submit";
+      ok.textContent = "Unlock";
+      ok.style.cssText = "background:#7C3AED;color:#fff;border:0;border-radius:9px;padding:.55rem 1.1rem;" +
+        "cursor:pointer;font-weight:600";
+      row.append(cancel, ok);
+      form.append(title, hint, input, problem, row);
+      dlg.append(form);
+      document.body.append(dlg);
+      let answer = null;
+      const finish = () => { const v = answer; input.value = ""; dlg.remove(); resolve(v); };
+      form.addEventListener("submit", (e) => { e.preventDefault(); if (!input.value) return; answer = input.value; dlg.close(); });
+      cancel.addEventListener("click", () => dlg.close());
+      dlg.addEventListener("close", finish, { once: true });
+      dlg.showModal();
+      input.focus();
+    });
+  }
+
+  // Ask for the vault passphrase until it unlocks the stored key; null = cancelled.
+  async function unlockStoredKey(env) {
+    let error = "";
+    for (;;) {
+      const pass = await askPassphrase(error);
+      if (pass === null) return null;
+      let armored;
+      try { armored = await decryptPrivateKey(env, pass); }
+      catch (e) { error = "That passphrase did not unlock your identity. Try again."; continue; }
+      let pk = await window.openpgp.readPrivateKey({ armoredKey: armored });
+      if (!pk.isDecrypted()) {
+        try { pk = await window.openpgp.decryptKey({ privateKey: pk, passphrase: pass }); }
+        catch (e) { pk = await window.openpgp.decryptKey({ privateKey: pk, passphrase: "" }); }
+      }
+      return pk;
+    }
+  }
+
   async function loadChallengeFor(base, fp) {
     const cn = btoa(String.fromCharCode.apply(null, crypto.getRandomValues(new Uint8Array(16))));
     const r = await fetch(base + "/capauth/v1/challenge", {
@@ -484,16 +567,10 @@ import { decryptPrivateKey, isEncryptedEnvelope } from "/bunker/lib/keyvault.js"
     if (!window.openpgp) return err("OpenPGP not loaded — reload the page.");
     let env; try { env = JSON.parse(raw); } catch (e) { return err("Stored key is corrupt."); }
     if (!isEncryptedEnvelope(env)) return err("Stored key is not a valid vault envelope.");
-    const pass = prompt("Vault passphrase (to unlock your key on this device):");
-    if (!pass) return;
     try {
       status && status("");
-      const armored = await decryptPrivateKey(env, pass);
-      let pk = await window.openpgp.readPrivateKey({ armoredKey: armored });
-      if (!pk.isDecrypted()) {
-        try { pk = await window.openpgp.decryptKey({ privateKey: pk, passphrase: pass }); }
-        catch (e) { pk = await window.openpgp.decryptKey({ privateKey: pk, passphrase: "" }); }
-      }
+      const pk = await unlockStoredKey(env);
+      if (!pk) return;
       const ch = await loadChallengeFor(base, fp);
       const canonical = [
         "CAPAUTH_NONCE_V1", "nonce=" + ch.nonce, "client_nonce=" + ch.client_nonce_echo,
@@ -524,14 +601,8 @@ import { decryptPrivateKey, isEncryptedEnvelope } from "/bunker/lib/keyvault.js"
     if (!window.openpgp) throw new Error("OpenPGP not loaded — reload the page.");
     const env = JSON.parse(raw);
     if (!isEncryptedEnvelope(env)) throw new Error("Stored key is not a valid vault envelope.");
-    const pass = prompt("Vault passphrase (to unlock your key on this device):");
-    if (!pass) throw new Error("cancelled");
-    const armored = await decryptPrivateKey(env, pass);
-    let pk = await window.openpgp.readPrivateKey({ armoredKey: armored });
-    if (!pk.isDecrypted()) {
-      try { pk = await window.openpgp.decryptKey({ privateKey: pk, passphrase: pass }); }
-      catch (e) { pk = await window.openpgp.decryptKey({ privateKey: pk, passphrase: "" }); }
-    }
+    const pk = await unlockStoredKey(env);
+    if (!pk) throw new Error("cancelled");
     const ch = await loadChallengeFor(base, fp);
     const canonical = [
       "CAPAUTH_NONCE_V1", "nonce=" + ch.nonce, "client_nonce=" + ch.client_nonce_echo,

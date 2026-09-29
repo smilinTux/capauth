@@ -28,9 +28,12 @@ def home(tmp_path, monkeypatch):
     skcapstone.AGENT_HOME module attribute (captured at import-time) are
     redirected to tmp_path so no fragment ever escapes to the real home.
     """
+    # skcapstone is the OPTIONAL backbone and needs Python 3.11+, while capauth
+    # supports 3.10: skip (not error) where it cannot be installed. CI installs
+    # it and asserts the import on 3.11+, so a skip there cannot hide a break.
+    skcapstone = pytest.importorskip("skcapstone")
     monkeypatch.setenv("SKCAPSTONE_HOME", str(tmp_path))
     monkeypatch.delenv("SK_STANDALONE", raising=False)
-    import skcapstone
 
     monkeypatch.setattr(skcapstone, "AGENT_HOME", str(tmp_path))
     return tmp_path

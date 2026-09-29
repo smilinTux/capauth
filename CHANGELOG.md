@@ -6,6 +6,11 @@ All notable changes to `capauth` are documented here. The format is based on
 
 ## [Unreleased]
 
+- CI: green on main again. `ruff format` (pinned 0.15.4) applied to
+  `tests/test_backup_fallback.py`; the Python 3.10 job no longer installs
+  skcapstone (it requires 3.11+), and the skcapstone integration tests skip
+  there while 3.11+ asserts the import so they cannot skip silently.
+
 - Raise operator proof absolute and idle ceilings to 24 hours while keeping
   access capabilities bounded to five minutes (card `4af0ae7f`).
 

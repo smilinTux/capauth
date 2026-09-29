@@ -37,11 +37,16 @@ jobs:
       # `import skcapstone` succeeds without it while
       # `from skcapstone.coordination import Board` does not. --no-deps means we
       # have to name it ourselves.
+      # skcapstone requires Python 3.11+, capauth supports 3.10: on 3.10 the
+      # integration tests skip (pytest.importorskip); on 3.11+ the import is
+      # asserted here so those tests can never skip silently.
       - name: Install skcapstone (optional integration backbone) from source
+        if: matrix.python-version != '3.10'
         run: |
           pip install --no-deps --no-cache-dir \
             "skcapstone @ git+https://github.com/smilinTux/skcapstone" \
             "skcoord @ git+https://github.com/smilinTux/skcoord"
+          python -c "from skcapstone.scheduler_jobs import load_jobs_with_dropins"
       - name: Run tests with coverage
         run: python -m pytest tests/ -v --tb=short --cov=capauth --cov-report=xml --cov-report=term-missing
       - name: Upload coverage

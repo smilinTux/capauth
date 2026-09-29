@@ -1,0 +1,71 @@
+{
+  "card_id": "1834d880",
+  "constraints_observed": {
+    "deployment": false,
+    "enrollment": false,
+    "export": false,
+    "external_action": false,
+    "live_execution": false,
+    "passphrase_contents_read": false,
+    "policy_activation": false,
+    "private_key_contents_read": false,
+    "restart": false,
+    "synchronization": false,
+    "transmission": false,
+    "wake_02_enablement": false
+  },
+  "custody_permission_metadata": {
+    "approved_local_directory": "/home/skuser01/.skcapstone/capauth/identities/skdashboard-read-only",
+    "directory_mode": "700",
+    "evidence_host": "chiap08",
+    "independent_evidence_artifact": "/home/skuser01/.skcapstone/evidence/work/572e5d4c/PASS-20260827-current.json",
+    "independent_evidence_sha256": "7dbc88927eaa04989b2098e26fdf315c2337c047e390de8299db0a8b2b194120",
+    "inspection": "stat metadata only",
+    "passphrase_reference_mode": "600",
+    "private_key_mode": "600",
+    "secret_contents_read": false,
+    "verification_command_template": "stat --printf='%a %F %n\\n' <directory> <private-key-file> <passphrase-reference-file>"
+  },
+  "pilot": {
+    "audiences": [
+      "skdashboard.read"
+    ],
+    "canonical_fqid": "skdashboard-read-only@casey.skworld.io",
+    "credential_reference": "capauth-custody:skdashboard-read-only:primary",
+    "custody_host": "chiap08",
+    "governance_owner": "casey",
+    "identity_id": "skdashboard.qual.registration",
+    "owner": "platform",
+    "profile_id": "efc323df-790f-4f9d-9b1d-c6ce9419feca",
+    "public_fingerprint": "DCE38ED7BC9D95D724B5FE7FECF9D6A423EC83F5",
+    "public_key_sha256": "3fcd748c73599aacee6ab3255b272a8f0df3db934b6e8bd8a9a95e98c7338997",
+    "purposes": [
+      "dashboard-read"
+    ],
+    "revocation_owner": "casey"
+  },
+  "profile_signature_verification": {
+    "command_template": "capauth --home <approved-local-custody-directory> profile verify",
+    "expected_exit_code": 0,
+    "expected_stdout": "Profile signature is VALID.",
+    "independent_verification": "Run the command on the approved custody host and compare the exit code, stdout, profile hash, public key hash, and fingerprint. Verification reads public profile material only.",
+    "observed_exit_code": 0,
+    "observed_stdout": "Profile signature is VALID.",
+    "private_material_required": false,
+    "profile_json_sha256": "7482e674ee76a9bd7b34ccad4a201cf0d55366e33b362ac98f10fa26bd7520b2",
+    "public_key_sha256": "3fcd748c73599aacee6ab3255b272a8f0df3db934b6e8bd8a9a95e98c7338997"
+  },
+  "review_gap_source": {
+    "card_id": "572e5d4c",
+    "preserved_fail_artifact": "/home/skuser01/.skcapstone/evidence/work/572e5d4c/review-20260827.json",
+    "preserved_fail_sha256": "d84fb849e1859df57de4a404216429456c8203e46b363a54acc29dbc462f82fe",
+    "verdict": "BLOCKED"
+  },
+  "roster": {
+    "exact_pilot_metadata_match": true,
+    "path": "docs/evidence/capauth/SKL-CAPAUTH-SIGNER-P3P-ROSTER-2026-08-25.json",
+    "pilot_row_count": 1,
+    "sha256": "9e43a0c18c003fbd7b2c2bb64aea528e4ae75a442a168b9e763cf78afa65a75a"
+  },
+  "schema_version": "capauth-scoped-signer-custody-evidence/v1"
+}

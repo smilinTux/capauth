@@ -162,7 +162,7 @@ _LOGIN_PAGE = """<!DOCTYPE html>
 <head>
   <meta charset="UTF-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>CapAuth — Sign in with PGP</title>
+  <title>CapAuth: Sign in with PGP</title>
   <style>
     *{{box-sizing:border-box;margin:0;padding:0}}
     body{{font-family:'Segoe UI',system-ui,sans-serif;background:#0f0f1a;color:#e2e8f0;
@@ -212,7 +212,7 @@ _LOGIN_PAGE = """<!DOCTYPE html>
   <details id="manual-pgp">
   <summary>Other sign-in and recovery options</summary>
   <p class="sub" style="font-size:.74rem;margin:.6rem 0">The text below is the message to sign. It is not a signature. Paste only a fresh ASCII-armored PGP signature into the signature box.</p>
-  <div class="step">1 — Your PGP fingerprint</div>
+  <div class="step">1 - Your PGP fingerprint (remembered after the first login)</div>
   <label for="fp">Fingerprint (40- or 64-hex chars)</label>
   <input id="fp" type="text" maxlength="64" placeholder="ABCDEF0123..." autocomplete="off"/>
 
@@ -220,9 +220,13 @@ _LOGIN_PAGE = """<!DOCTYPE html>
   <div class="nonce-box" id="nonce">Enter your fingerprint to load the complete signed payload.</div>
   <button class="copy" type="button" onclick="copyPayload()">Copy message</button>
 
-  <div class="step">3 - Paste your signed message or detached signature</div>
-  <label for="sig">Signed message / signature (ASCII armor)</label>
-  <textarea id="sig" placeholder="-----BEGIN PGP MESSAGE-----&#10;...&#10;-----END PGP MESSAGE-----"></textarea>
+  <div class="step">3 - Sign it: run <code>capauth sign-challenge</code> on your computer</div>
+  <p class="sub" style="font-size:.74rem;margin:.2rem 0 .8rem">It signs the copied message with your key (gpg asks for your passphrase in its own window) and puts the signature on the clipboard.</p>
+
+  <div class="step">4 - Paste the signature</div>
+  <button class="copy" type="button" onclick="pasteAndSubmit()">Paste signature and continue</button>
+  <label for="sig">or paste it here yourself (ASCII armor)</label>
+  <textarea id="sig" placeholder="-----BEGIN PGP SIGNATURE-----&#10;...&#10;-----END PGP SIGNATURE-----"></textarea>
 
   <p class="sub">This fingerprint must already have an approved CapAuth enrollment.</p>
 
@@ -236,7 +240,7 @@ _LOGIN_PAGE = """<!DOCTYPE html>
   </div>
 
   <p style="margin-top:1rem;font-size:.74rem;color:#475569">
-    Manual GPG: copy the complete message, then use <code>gpg --armor --sign</code> for an inline signed message
+    Without the capauth tool: copy the complete message, then use <code>gpg --armor --sign</code> for an inline signed message
     or <code>gpg --armor --detach-sign</code> for a detached signature. The browser extension can sign automatically.
   </p>
   </details>
@@ -282,7 +286,7 @@ refreshBrowserAuth();
 async function passkeyLogin(){{
   document.getElementById("err").style.display="none";
   if(!window.capauthWebAuthn || !window.capauthWebAuthn.available()){{
-    return setErr("This browser has no passkey support — use PGP above.");
+    return setErr("This browser has no passkey support. Use PGP below.");
   }}
   try{{
     const redirect = await window.capauthWebAuthn.login(BASE, REQUEST_ID);
@@ -321,14 +325,14 @@ document.getElementById("fp").addEventListener("blur", async function(){{
       "service="+ch.service, "expires="+ch.expires].join("\\n");
     document.getElementById("nonce").textContent=currentPayload;
     // window.capauth provider: auto-sign with Tier B origin-binding. The
-    // extension injects origin=window.location.origin and signs in-extension —
+    // extension injects origin=window.location.origin and signs in-extension -
     // the private key never reaches this page. Falls back to manual paste.
     if(window.capauth && window.capauth.isCapAuth){{
       try{{
         const res=await window.capauth.signChallenge(ch);
         document.getElementById("sig").value=res.signature;
         submitSig();
-      }}catch(e){{ /* denied/locked — leave the paste flow available */ }}
+      }}catch(e){{ /* denied/locked: leave the paste flow available */ }}
     }}
   }}catch(e){{ document.getElementById("nonce").textContent="Error: "+e.message; }}
 }});
@@ -338,7 +342,7 @@ async function submitSig(){{
   const fp=document.getElementById("fp").value.trim().toUpperCase().replace(/\\s/g,"");
   const sig=document.getElementById("sig").value.trim();
   if(![40,64].includes(fp.length)) return setErr("Fingerprint must be 40- or 64-hex characters.");
-  if(!currentNonce) return setErr("No challenge loaded — tab out of the fingerprint field first.");
+  if(!currentNonce) return setErr("No challenge loaded. Enter your fingerprint first.");
   if(!sig) return setErr("Paste your PGP signature.");
 
   const body={{request_id:REQUEST_ID, fingerprint:fp, nonce:currentNonce,
@@ -347,9 +351,33 @@ async function submitSig(){{
     method:"POST", headers:{{"Content-Type":"application/json"}}, body: JSON.stringify(body)
   }});
   if(!r.ok){{ const b=await r.json().catch(()=>({{}})); return setErr(b.detail || b.error || "Login failed."); }}
+  try{{ localStorage.setItem("capauth_manual_fp",fp); }}catch(e){{}}
   const d=await r.json();
   window.location.href=d.redirect_to;
 }}
+
+async function pasteAndSubmit(){{
+  document.getElementById("err").style.display="none";
+  let text="";
+  try{{ text=await navigator.clipboard.readText(); }}
+  catch(e){{ return setErr("This browser did not allow reading the clipboard. Paste the signature into the box (Ctrl+V), then click Verify & Continue."); }}
+  if(!/BEGIN PGP (SIGNATURE|MESSAGE)/.test(text)){{
+    return setErr("The clipboard holds no signature yet. Click Copy message, run capauth sign-challenge, then try again.");
+  }}
+  document.getElementById("sig").value=text.trim();
+  submitSig();
+}}
+
+// the fingerprint of the last successful manual login: open this section
+// with a fresh challenge loaded, so the next login is copy, sign, paste
+(function(){{
+  let fp="";
+  try{{ fp=(localStorage.getItem("capauth_manual_fp")||"").trim(); }}catch(e){{}}
+  if(![40,64].includes(fp.length)||!/^[0-9A-F]+$/.test(fp)) return;
+  document.getElementById("fp").value=fp;
+  document.getElementById("manual-pgp").open=true;
+  document.getElementById("fp").dispatchEvent(new Event("blur"));
+}})();
 </script>
 </body>
 </html>

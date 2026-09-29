@@ -646,6 +646,47 @@ def export_pubkey(ctx: click.Context, output: Optional[str]) -> None:
         raise SystemExit(1)
 
 
+@main.command("sign-challenge")
+@click.option(
+    "--key",
+    default=None,
+    help="Fingerprint to sign with (default: $CAPAUTH_SIGN_KEY, then your CapAuth profile).",
+)
+@click.option("--stdin", "from_stdin", is_flag=True, help="Read the challenge from stdin.")
+@click.option("--stdout", "to_stdout", is_flag=True, help="Print the signature instead.")
+@click.pass_context
+def sign_challenge_cmd(
+    ctx: click.Context, key: Optional[str], from_stdin: bool, to_stdout: bool
+) -> None:
+    """Sign the CapAuth login challenge on the clipboard.
+
+    On the login page click "Copy message", run this, then paste: the
+    signature replaces the challenge on the clipboard. gpg-agent asks for the
+    key's passphrase in its own dialog; this command never sees it.
+    """
+    from .sign_challenge import (
+        ChallengeError,
+        normalize_challenge,
+        read_clipboard,
+        resolve_key,
+        write_clipboard,
+    )
+    from .sign_challenge import sign as gpg_sign
+
+    try:
+        fp = resolve_key(key, ctx.obj.get("home"))
+        text = click.get_text_stream("stdin").read() if from_stdin else read_clipboard()
+        signature = gpg_sign(normalize_challenge(text), fp)
+        if to_stdout:
+            click.echo(signature, nl=False)
+        else:
+            write_clipboard(signature)
+            click.echo("signed, paste it now")
+    except ChallengeError as exc:
+        click.echo(f"Error: {exc}", err=True)
+        raise SystemExit(1)
+
+
 @main.command("verify")
 @click.option(
     "--pubkey",

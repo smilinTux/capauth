@@ -6,6 +6,12 @@ All notable changes to `capauth` are documented here. The format is based on
 
 ## [Unreleased]
 
+- Release tags (`v*`) now also publish the service image
+  `ghcr.io/smilintux/capauth:<version>` (`.github/workflows/image.yml`): the
+  tag must be on main, a published version is never overwritten, the image is
+  smoke-tested (`capauth --version`, `/capauth/v1/status`) before the push,
+  and the job summary records the digest to pin (`<version>@sha256:...`).
+
 - `capauth sign-challenge`: reads the CapAuth login challenge from the
   clipboard (or `--stdin`), refuses anything that is not a complete
   `CAPAUTH_NONCE_V1`/`V2` challenge, signs it with gpg (gpg-agent's pinentry

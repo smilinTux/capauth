@@ -6,6 +6,9 @@ All notable changes to `capauth` are documented here. The format is based on
 
 ## [Unreleased]
 
+- Service discovery no longer invents a nonexistent CapAuth PID file. Without
+  an explicit daemon-owned PID path, health remains unknown.
+
 - Release tags (`v*`) now also publish the service image
   `ghcr.io/smilintux/capauth:<version>` (`.github/workflows/image.yml`): the
   tag must be on main, a published version is never overwritten, the image is

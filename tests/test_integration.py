@@ -190,6 +190,11 @@ def test_no_leak_to_real_home(home):
     import os
     from pathlib import Path
 
+    real_job = (
+        Path(os.path.expanduser("~/.skcapstone/config/jobs.d"))
+        / f"{integration.ROTATION_JOB}.yaml"
+    )
+    before = real_job.read_bytes() if real_job.exists() else None
     integration.ensure_schedule()
     integration.register_self(pid_file="/tmp/capauth-leak-test.pid")
 
@@ -197,9 +202,8 @@ def test_no_leak_to_real_home(home):
     assert (home / "registry" / "capauth.json").exists()
 
     # Verify real home is clean (if it exists at all, the job file must not be there)
-    real_jobs_d = Path(os.path.expanduser("~/.skcapstone/config/jobs.d"))
-    if real_jobs_d.exists():
-        assert not (real_jobs_d / f"{integration.ROTATION_JOB}.yaml").exists()
+    after = real_job.read_bytes() if real_job.exists() else None
+    assert after == before
 
 
 # ---------------------------------------------------------------------------
@@ -216,3 +220,10 @@ def test_integration_module_constants():
     """Check module-level constants are correct."""
     assert integration.SERVICE == "capauth"
     assert integration.ROTATION_JOB == "capauth_key_rotation_check"
+
+
+def test_register_self_without_pid_is_discovery_only(home):
+    assert integration.register_self() is True
+    entry = json.loads((home / "registry" / "capauth.json").read_text())
+    assert entry["pid_file"] is None
+    assert entry["health_url"] is None

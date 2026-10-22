@@ -77,6 +77,7 @@ class DecisionReason(StrEnum):
     INVALID_SIGNATURE = "invalid_signature"
     UNTRUSTED_ISSUER = "untrusted_issuer"
     POLICY_MISMATCH = "policy_mismatch"
+    PORTFOLIO_POLICY_DENIED = "portfolio_policy_denied"
     BACKEND_UNAVAILABLE = "backend_unavailable"
     PRINCIPAL_UNBOUND = "principal_unbound"
     PRINCIPAL_INACTIVE = "principal_inactive"
@@ -177,6 +178,50 @@ class AuthorizationRequest(StrictValue):
     principal: Principal
     scope: CapabilityScope
     correlation_id: str = Field(min_length=1, max_length=256)
+
+
+# Atlas can report typed operational evidence to the Portfolio surface. It is
+# deliberately not a Portfolio decision-maker or mutation principal.
+ATLAS_PRINCIPAL_KIND = "atlas"
+ATLAS_OBSERVATION_CAPABILITY = "portfolio.observation.propose"
+ATLAS_OBSERVATION_TARGET = "portfolio.observation.propose"
+ATLAS_OBSERVATION_RESOURCE_TYPE = "portfolio.observation"
+ATLAS_OBSERVATION_PURPOSE = "purpose:portfolio.operational-observation"
+ATLAS_PORTFOLIO_DENIED_CAPABILITIES = frozenset(
+    {
+        "portfolio.plan.author",
+        "portfolio.rank",
+        "portfolio.allocate",
+        "portfolio.claim",
+        "portfolio.renew",
+        "portfolio.release",
+        "portfolio.approve",
+        "portfolio.review",
+        "portfolio.review.assign",
+        "portfolio.review.decide",
+        "portfolio.complete",
+        "portfolio.executor.select",
+        "portfolio.handoff",
+        "portfolio.policy.mutate",
+    }
+)
+
+
+def _atlas_portfolio_denied(request: AuthorizationRequest) -> bool:
+    """Whether the exact request exceeds Atlas's operational-observation role."""
+    if request.principal.kind != ATLAS_PRINCIPAL_KIND:
+        return False
+    scope = request.scope
+    if not scope.capability.startswith("portfolio."):
+        return False
+    purposes = frozenset(value for value in scope.constraints if value.startswith("purpose:"))
+    return not (
+        scope.capability == ATLAS_OBSERVATION_CAPABILITY
+        and scope.target == ATLAS_OBSERVATION_TARGET
+        and scope.operation == "propose"
+        and scope.resource_type == ATLAS_OBSERVATION_RESOURCE_TYPE
+        and purposes == {ATLAS_OBSERVATION_PURPOSE}
+    )
 
 
 class PrincipalPolicyReference(StrictValue):
@@ -994,6 +1039,16 @@ class CapabilityAuthorizer:
                 principal_refs,
                 revocation,
             )
+        if _atlas_portfolio_denied(request):
+            self._deny_with_state(
+                request,
+                decision_id,
+                DecisionReason.PORTFOLIO_POLICY_DENIED,
+                chain,
+                issuer_policy,
+                principal_refs,
+                revocation,
+            )
 
         expires_at = leaf.token.payload.expires_at
         assert expires_at is not None
@@ -1257,6 +1312,17 @@ class CapabilityAuthorizer:
                 decision_id,
                 DecisionReason.CURRENT_STATE_CHANGED,
                 chain,
+                audit_sequence=2,
+            )
+        if _atlas_portfolio_denied(request):
+            self._deny(
+                request,
+                decision_id,
+                DecisionReason.PORTFOLIO_POLICY_DENIED,
+                chain,
+                issuer_revision=prior.trusted_issuer_policy_revision,
+                principal_references=prior.principal_policy_revisions,
+                revocation_revision=prior.revocation_revision,
                 audit_sequence=2,
             )
 

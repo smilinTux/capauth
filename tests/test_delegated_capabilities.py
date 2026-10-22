@@ -11,6 +11,11 @@ from uuid import uuid4
 import pytest
 
 from capauth.delegated import (
+    ATLAS_OBSERVATION_CAPABILITY,
+    ATLAS_OBSERVATION_PURPOSE,
+    ATLAS_OBSERVATION_RESOURCE_TYPE,
+    ATLAS_OBSERVATION_TARGET,
+    ATLAS_PORTFOLIO_DENIED_CAPABILITIES,
     VERIFIER_POLICY_VERSION,
     AuthorizationDeniedError,
     AuthorizationRequest,
@@ -563,4 +568,114 @@ def test_credential_digest_binds_signature_and_policy() -> None:
     )
     assert credential_digest(parsed.token, VERIFIER_POLICY_VERSION) != credential_digest(
         parsed.token, "capauth-delegated-authz/v2"
+    )
+
+
+def _atlas_scope(
+    *, capability: str = ATLAS_OBSERVATION_CAPABILITY, purpose: str = ATLAS_OBSERVATION_PURPOSE
+):
+    return CapabilityScope(
+        audience="skcapstone",
+        target=ATLAS_OBSERVATION_TARGET,
+        capability=capability,
+        operation="propose",
+        resource_type=ATLAS_OBSERVATION_RESOURCE_TYPE,
+        resource_id=None,
+        constraints=frozenset({purpose}),
+    )
+
+
+def _atlas_rig(scope: CapabilityScope) -> tuple[Rig, Principal]:
+    rig = Rig()
+    atlas = Principal(principal_id="atlas-1", subject="atlas@example.test", kind="atlas")
+    rig.principals = InMemoryPrincipalPolicyBackend((atlas,))
+    rig.trusted = StaticTrustedIssuerBackend(
+        (
+            IssuerGrant(
+                fingerprint=ISSUER,
+                capabilities=frozenset({scope.capability}),
+                audiences=frozenset({scope.audience}),
+                principal_kinds=frozenset({"atlas"}),
+            ),
+        )
+    )
+    rig.authorizer = rig.new_authorizer()
+    rig.presented = rig.issuer.issue_root(
+        principal=atlas,
+        scope=scope,
+        ttl_seconds=60,
+        max_delegation_depth=2,
+    )
+    return rig, atlas
+
+
+def test_atlas_can_submit_only_the_typed_operational_observation() -> None:
+    scope = _atlas_scope()
+    rig, atlas = _atlas_rig(scope)
+
+    decision = rig.authorizer.authorize(rig.presented, rig.request(principal=atlas, scope=scope))
+
+    assert decision.reason is DecisionReason.ALLOW
+
+
+@pytest.mark.parametrize("capability", sorted(ATLAS_PORTFOLIO_DENIED_CAPABILITIES))
+def test_atlas_is_explicitly_denied_each_portfolio_decision_or_mutation(capability: str) -> None:
+    scope = _atlas_scope(capability=capability)
+    rig, atlas = _atlas_rig(scope)
+
+    assert (
+        denial_reason(rig.authorizer, rig.presented, rig.request(principal=atlas, scope=scope))
+        is DecisionReason.PORTFOLIO_POLICY_DENIED
+    )
+
+
+def test_atlas_observation_denial_survives_wrong_purpose_and_attenuation() -> None:
+    scope = _atlas_scope()
+    rig, atlas = _atlas_rig(scope)
+    child_scope = scope.model_copy(
+        update={
+            "constraints": frozenset(
+                {ATLAS_OBSERVATION_PURPOSE, "purpose:portfolio-plan-authoring"}
+            )
+        }
+    )
+    child = DelegatingCapabilityIssuer(authorizer=rig.authorizer, issuer=rig.issuer).delegate(
+        parent=rig.presented,
+        authenticated_parent=atlas,
+        child_principal=atlas,
+        child_scope=child_scope,
+        correlation_id=str(uuid4()),
+    )
+
+    assert (
+        denial_reason(
+            rig.new_authorizer(replay=InMemoryReplayBackend(clock=rig.clock)),
+            child,
+            rig.request(principal=atlas, scope=child_scope),
+        )
+        is DecisionReason.PORTFOLIO_POLICY_DENIED
+    )
+
+
+def test_atlas_identity_spoof_and_unavailable_policy_backend_never_allow() -> None:
+    scope = _atlas_scope()
+    rig, atlas = _atlas_rig(scope)
+    spoofed = atlas.model_copy(update={"kind": "agent"})
+
+    assert (
+        denial_reason(rig.authorizer, rig.presented, rig.request(principal=spoofed, scope=scope))
+        is DecisionReason.PRINCIPAL_REBOUND
+    )
+
+    class UnavailablePrincipals:
+        def snapshot(self, principal):
+            raise RuntimeError("unavailable")
+
+    assert (
+        denial_reason(
+            rig.new_authorizer(principals=UnavailablePrincipals()),
+            rig.presented,
+            rig.request(principal=atlas, scope=scope),
+        )
+        is DecisionReason.BACKEND_UNAVAILABLE
     )

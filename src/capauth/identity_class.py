@@ -114,6 +114,8 @@ class IdentityClassName(str, Enum):
     NODE = "node"
     #: A phone / tablet / browser at the edge. Narrowest of all.
     EDGE_DEVICE = "edge-device"
+    #: Atlas is an operational observer, never a Portfolio decision maker.
+    ATLAS = "atlas"
 
 
 class IdentityClass(BaseModel):
@@ -282,6 +284,32 @@ DEFAULT_CLASSES: dict[str, IdentityClass] = {
         description=(
             "A phone, tablet, or browser at the edge: read, message, and call. The "
             "most easily stolen identity in the fleet, so the narrowest ceiling."
+        ),
+    ),
+    IdentityClassName.ATLAS.value: IdentityClass(
+        name=IdentityClassName.ATLAS,
+        allowed_capabilities=["portfolio.observation.propose"],
+        forbidden_capabilities=[
+            Capability.ALL.value,
+            "portfolio.plan.author",
+            "portfolio.rank",
+            "portfolio.allocate",
+            "portfolio.claim",
+            "portfolio.renew",
+            "portfolio.release",
+            "portfolio.approve",
+            "portfolio.review",
+            "portfolio.review.assign",
+            "portfolio.review.decide",
+            "portfolio.complete",
+            "portfolio.executor.select",
+            "portfolio.handoff",
+            "portfolio.policy.mutate",
+        ],
+        minimum_mode=EnrollmentMode.ATTESTED,
+        description=(
+            "Atlas reports typed operational observations. It has no Portfolio "
+            "planning, ranking, mutation, approval, review, handoff, or policy authority."
         ),
     ),
 }

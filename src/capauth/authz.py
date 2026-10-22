@@ -498,6 +498,15 @@ _SKDASHBOARD_RULES: tuple[CapabilityRule, ...] = tuple(
     for capability in capabilities
 )
 
+_PORTFOLIO_RULES: tuple[CapabilityRule, ...] = (
+    CapabilityRule(
+        capability="portfolio.observation.propose",
+        required_capability="portfolio.observation.propose",
+        minimum_mode=EnrollmentMode.ATTESTED,
+        description="Submit typed operational evidence without Portfolio decision authority.",
+    ),
+)
+
 #: The default, process-wide capability rule table, keyed by capability name.
 #: The seeded skchat rows plus the skgateway rows (L1.8) plus the skcode RCE rows
 #: (CR-6.2 C3) plus the skdashboard agentrun rows (card 640698fa) plus the
@@ -512,6 +521,7 @@ DEFAULT_RULES: dict[str, CapabilityRule] = {
         *_AGENTRUN_RULES,
         *_CHANGE_RULES,
         *_SKDASHBOARD_RULES,
+        *_PORTFOLIO_RULES,
     )
 }
 

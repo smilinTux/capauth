@@ -125,6 +125,26 @@ def test_node_class_forbids_the_three_operator_capabilities():
     assert node.forbids(Capability.IDENTITY_SIGN.value)
 
 
+def test_atlas_class_permits_only_operational_observation_proposals():
+    atlas = DEFAULT_CLASSES[IdentityClassName.ATLAS.value]
+
+    assert atlas.permits("portfolio.observation.propose")
+    assert atlas.forbids("portfolio.plan.author")
+    assert atlas.forbids("portfolio.rank")
+    assert atlas.forbids("portfolio.allocate")
+    assert atlas.forbids("portfolio.claim")
+    assert atlas.forbids("portfolio.renew")
+    assert atlas.forbids("portfolio.release")
+    assert atlas.forbids("portfolio.approve")
+    assert atlas.forbids("portfolio.review.assign")
+    assert atlas.forbids("portfolio.review.decide")
+    assert atlas.forbids("portfolio.complete")
+    assert atlas.forbids("portfolio.executor.select")
+    assert atlas.forbids("portfolio.handoff")
+    assert atlas.forbids("portfolio.policy.mutate")
+    assert not atlas.permits("portfolio.read")
+
+
 def test_node_allowlist_is_inference_and_reads_only():
     node = DEFAULT_CLASSES[IdentityClassName.NODE.value]
 

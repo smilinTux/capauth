@@ -28,6 +28,7 @@ services:
       CAPAUTH_JWT_SECRET: ${CAPAUTH_JWT_SECRET:?Set CAPAUTH_JWT_SECRET in .env}
       CAPAUTH_REQUIRE_APPROVAL: ${CAPAUTH_REQUIRE_APPROVAL:-false}
       CAPAUTH_DB_PATH: /data/keys.db
+      CAPAUTH_DATA_DIR: /data
       # Optional: server PGP key for signing nonces
       # CAPAUTH_SERVER_KEY_ARMOR: <base64-of-armored-private-key>
       # CAPAUTH_SERVER_KEY_PASSPHRASE: <passphrase>

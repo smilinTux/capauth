@@ -10,7 +10,21 @@ import base64
 
 import pytest
 
-from capauth.service.push import PushRegistry
+from capauth.service.push import PushRegistry, default_data_dir
+
+
+def test_default_data_dir_uses_capauth_service_root(monkeypatch, tmp_path):
+    monkeypatch.setenv("CAPAUTH_HOME", str(tmp_path / "capauth-home"))
+    monkeypatch.delenv("CAPAUTH_DATA_DIR", raising=False)
+
+    assert default_data_dir() == tmp_path / "capauth-home" / "service"
+
+
+def test_configured_data_dir_overrides_capauth_service_root(monkeypatch, tmp_path):
+    configured = tmp_path / "configured"
+    monkeypatch.setenv("CAPAUTH_DATA_DIR", str(configured))
+
+    assert default_data_dir() == configured
 
 
 def test_vapid_key_generated_and_stable(tmp_path):

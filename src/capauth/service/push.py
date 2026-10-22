@@ -32,6 +32,8 @@ import threading
 from pathlib import Path
 from typing import Any, Optional
 
+from .. import resolve_capauth_home
+
 logger = logging.getLogger("capauth.push")
 
 _VAPID_SUBJECT = os.environ.get("CAPAUTH_VAPID_SUBJECT", "mailto:admin@skworld.io")
@@ -41,6 +43,14 @@ def _b64url(raw: bytes) -> str:
     return base64.urlsafe_b64encode(raw).rstrip(b"=").decode("ascii")
 
 
+def default_data_dir() -> Path:
+    """Resolve the service-owned durable data root for push state."""
+    configured = os.environ.get("CAPAUTH_DATA_DIR")
+    if configured:
+        return Path(configured)
+    return resolve_capauth_home() / "service"
+
+
 class PushRegistry:
     """VAPID keypair + fingerprint→subscriptions registry + push sender.
 
@@ -48,8 +58,8 @@ class PushRegistry:
     JSON) so the application-server key and subscriptions survive restarts.
     """
 
-    def __init__(self, data_dir: str = "/data") -> None:
-        self._dir = Path(data_dir)
+    def __init__(self, data_dir: str | os.PathLike[str] | None = None) -> None:
+        self._dir = Path(data_dir) if data_dir is not None else default_data_dir()
         self._lock = threading.Lock()
         self._subs_path = self._dir / "push_subs.json"
         self._vapid_path = self._dir / "vapid_private.pem"

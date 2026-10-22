@@ -1388,7 +1388,7 @@ _bunker = BunkerBroker(
     max_sessions=int(os.environ.get("CAPAUTH_BUNKER_MAX_SESSIONS", "500")),
     store_path=_bunker_store,
 )
-_push = PushRegistry(data_dir=os.environ.get("CAPAUTH_DATA_DIR", "/data"))
+_push = PushRegistry()
 
 # Simple in-memory sliding-window rate limiter for POST /bunker/session, keyed by
 # client IP. Defaults: 10 new sessions / 60s / IP. Tune via env. This is a DoS

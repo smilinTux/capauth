@@ -4,16 +4,26 @@
 #
 #  Build:
 #    docker build -f Dockerfile.authentik-capauth \
-#      -t ghcr.io/smilintux/authentik-capauth:2026.5.3 \
-#      -t ghcr.io/smilintux/authentik-capauth:latest .
+#      -t skgit.skstack01.douno.it/skadmin/authentik-capauth:2025.12.6 \
+#      -t skgit.skstack01.douno.it/skadmin/authentik-capauth:latest .
 #
 #  Push:
-#    docker push ghcr.io/smilintux/authentik-capauth:2026.5.3
-#    docker push ghcr.io/smilintux/authentik-capauth:latest
+#    docker push skgit.skstack01.douno.it/skadmin/authentik-capauth:2025.12.6
+#    docker push skgit.skstack01.douno.it/skadmin/authentik-capauth:latest
 #
 #  AK_VERSION tracks the latest STABLE Authentik release (override with --build-arg).
+#
+#  2026-10-23 (Chef decision, tactical patch): pinned to 2025.12.6, the latest
+#  2025.12.x patch, same major line as nor prod's running 2025.12.3. This is the
+#  SAME-LINE security patch (fixes GHSA-xp7f-xjjx-gwm8 Critical SourceStage bypass
+#  and GHSA-c3m2-jqmq-pvp3 SAML XML signature wrapping), not the full 2026.8.5
+#  migration. The 2025.12.x line does not receive the later privilege-escalation
+#  (GHSA-h6c5-mpvq-j4jc) or SAML-DoS (GHSA-cxwx-9x59-28qm) backports -- those land
+#  only with the full upgrade (see docs/AUTHENTIK_STRATEGY_DECISION.md, option b,
+#  decision 2026-10-23: retire this fork for CAPAUTH_ENABLED on stock Authentik as
+#  part of that upgrade).
 # ──────────────────────────────────────────────────────────────────────
-ARG AK_VERSION=2026.5.3
+ARG AK_VERSION=2025.12.6
 
 # ── Stage 1: Rebuild Authentik frontend with ak-stage-capauth ────────
 FROM node:24-bookworm AS web-builder
@@ -60,6 +70,13 @@ USER root
 # instead of hardcoding it — otherwise capauth lands on the wrong path and Django can't import
 # it (ModuleNotFoundError: capauth, live-proven on .13 against 2026.5.3).
 COPY . /app/capauth
+# capauth's pyproject.toml uses setuptools_scm (dynamic version from git tags),
+# but .dockerignore excludes .git from the build context, so `pip install
+# /app/capauth` cannot infer a version and fails with "setuptools-scm was
+# unable to detect version" (hit rebuilding this image 2026-10-23, unrelated
+# to the AK_VERSION bump -- would fail the same way at any Authentik version
+# until this is set). Pin it explicitly to the latest released tag.
+ENV SETUPTOOLS_SCM_PRETEND_VERSION_FOR_CAPAUTH=0.3.13
 RUN VENV_SP="$(ls -d /ak-root/.venv/lib/python3.*/site-packages | head -1)" && \
     echo "Installing capauth into $VENV_SP" && \
     pip install --no-cache-dir --no-deps --target "$VENV_SP" /app/capauth && \

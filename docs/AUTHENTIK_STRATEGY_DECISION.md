@@ -1,8 +1,14 @@
 # Decision Document: Long-Term Strategy for the CapAuth ↔ Authentik Integration
 
-**Status:** Proposed (decision pending Chef)
-**Date:** 2026-06-22
-**Author:** Opus (research + recommendation)
+**Status:** DECIDED — Chef approved Option B (two-track strategy, §5) on 2026-10-23,
+as part of the full Authentik 2026.8.5 upgrade (framework release v2.26.17).
+Decision relayed verbatim through the coordinator: "patch now, and b for capauth."
+Scope: this applies to the full 2026.8.5 migration, not the 2026-10-23 tactical
+same-line security patch (nor to 2025.12.6, NAM to 2026.2.7), which keeps both
+images on their current major line and does not touch the fork or the Source
+integration. See "2026-10-23 cutover plan" at the end of this document.
+**Date:** 2026-06-22 (proposed) / 2026-10-23 (decided)
+**Author:** Opus (research + recommendation); decision recorded by Lumina per Chef/coordinator
 **Scope:** How to maintain the CapAuth PGP passwordless login *inside* Authentik
 long-term — upstream PR, fork/custom image, redistributable package, or drop
 Authentik in favor of native per-app plugins.
@@ -370,3 +376,76 @@ likely to be accepted. A PGP *Stage* PR is low-EV and should not be our first mo
   `src/capauth/integrations/nextcloud/` (`lib/User/Backend.php`,
   `lib/AlternativeLogin/CapAuthLogin.php`)
 - Deploy history / E2E-API-only proof: `HANDOFF-capauth-authentik-2026-06-17.md`
+
+
+---
+
+## 2026-10-23 cutover plan (nor, as part of the 2026.8.5 upgrade, v2.26.17)
+
+Chef's decision is Option B / Track 2 (CapAuth as an OIDC/OAuth Source on stock
+Authentik). This section records the concrete cutover plan for **nor**, the only
+estate still running the `Dockerfile.authentik-capauth` fork. NAM is unaffected
+(always ran stock Authentik, never had the fork).
+
+### What changes
+
+- nor's `sksso-prod_server`/`_worker` move from the custom image
+  (`skgit.skstack01.douno.it/skadmin/authentik-capauth:*`) to the **stock**
+  `ghcr.io/goauthentik/server:2026.8.5` image, the same image NAM runs.
+- The sksso role's `sksso.CAPAUTH_ENABLED: true` path (documented in
+  `v1/ansible/optional/sksso/README.md`, "CapAuth login (optional)") replaces
+  the baked-in stage: the standalone `capauth` service becomes an Authentik
+  **OAuth Source**, with its own login flow, instead of a flow stage compiled
+  into Authentik's bundle. This is already-shipped, already-tested code (commit
+  `ecc8e50`, "per-client require_nonce so stock Authentik's OAuth source can
+  log in"), not new engineering.
+- The existing CapAuth flow/stage objects baked in by the fork's blueprint (see
+  `AUTHENTIK_DEPLOYMENT_SKSSO.md`, flow `97730dbd-b5fc-4171-8dce-4de5273c1db2`)
+  are superseded by `tasks/capauth_provision.yml`'s `CAPAUTH_FLOW_SLUG`
+  (default `capauth-authentication`) and OAuth source objects. They are NOT
+  touched automatically; retiring the old objects is a manual admin-UI cleanup
+  step after the new flow is proven (see "Rollback" in the README's CapAuth
+  section for the exact unbind order, run in reverse as an adopt order).
+- Enrolled users move from the fork's `CapAuthKeyRegistry` (one row per PGP
+  fingerprint, no linked Authentik user) to `sksso.CAPAUTH_USERS`
+  (fingerprint maps to an existing Authentik user). Every current nor CapAuth
+  user must be re-enrolled against an actual Authentik user account before
+  cutover, or their login breaks. This is the one step with real user-facing
+  migration risk and needs its own checklist before the lab run.
+
+### Order of operations (lab first, skstack06, before any nor change)
+
+1. Deploy the sksso role on skstack06 at nor's exact current state: stock
+   2025.12.6 (post-tactical-patch) is NOT the fork, so model the fork explicitly
+   by building `authentik-capauth:2025.12.6` there too, so the lab reproduces
+   nor's real pre-cutover shape, not a simplified stand-in.
+2. Seed representative data: a handful of users and groups, at least one OIDC
+   provider, the embedded outpost plus a forward-auth proxy provider, and
+   enough CapAuth-fork enrollments to exercise the migration.
+3. Enable `sksso.CAPAUTH_ENABLED: true` alongside the still-running fork, bring
+   up the `capauth` service and OAuth source, and prove login through the new
+   path end to end (challenge and verify, OAuth source login, SSO fan-out)
+   while the old path still works too (parallel-run, not cutover yet).
+4. Only once the new path is proven: swap `sksso.IMAGE`/`authentik_version` to
+   stock `2026.8.5`, set `CAPAUTH_ENABLED: true` for real, remove the fork
+   image reference, and re-verify every login path (password, OIDC apps,
+   forward-auth, the new CapAuth OAuth source) plus the rollback (restore the
+   pre-cutover dump, confirm the fork image still boots against it).
+5. The full upgrade path for nor to reach 2026.8.5 still applies underneath
+   this (2025.12.6 to 2026.2.7 to 2026.5.7 to 2026.8.5); the CapAuth cutover
+   happens at the LAST hop, once nor is already on stock Authentik, not
+   before, since doing it earlier would mean rebuilding the fork against an
+   intermediate version for no reason.
+
+### Fork retirement (after the lab proof and after nor is cut over)
+
+- Freeze `Dockerfile.authentik-capauth` and
+  `scripts/build_authentik_capauth_image.sh`: add a banner pointing at this
+  decision and `CAPAUTH_ENABLED`, do not delete (historical reference and the
+  one documented rollback path if the Source integration needs to be backed
+  out urgently).
+- Archive the `release/authentik-capauth-cap10`, `cap11`, `cap12` branches (do
+  not force-delete; they are the build history for the fork, useful if anyone
+  needs to reconstruct exactly what nor ran).
+- Update `docs/authentik-capauth.md` with a top banner: "superseded by
+  CAPAUTH_ENABLED, see AUTHENTIK_STRATEGY_DECISION.md".

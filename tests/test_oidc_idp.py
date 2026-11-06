@@ -283,6 +283,36 @@ def test_login_page_documents_exact_signing_contract(oidc_app):
     assert "Sign from another device (QR)" in resp.text
 
 
+def test_login_page_copy_sign_paste_for_capauth_sign_challenge(oidc_app):
+    """The plain-words flow: copy the challenge, run `capauth sign-challenge`,
+    paste. The page has a copy button, a paste box and a one-click paste
+    button, and remembers the fingerprint so the next login only needs
+    copy, sign, paste."""
+    client, _router = oidc_app
+    resp = client.get(
+        "/oidc/authorize",
+        params={
+            "client_id": CLIENT_ID,
+            "redirect_uri": REDIRECT_URI,
+            "scope": "openid profile email groups",
+            "state": VALID_STATE,
+            "nonce": VALID_NONCE,
+            "code_challenge": "a" * 43,
+            "code_challenge_method": "S256",
+        },
+    )
+    page = resp.text
+    assert 'onclick="copyPayload()">Copy message</button>' in page
+    assert '<textarea id="sig"' in page
+    assert 'onclick="pasteAndSubmit()">Paste signature and continue</button>' in page
+    assert "navigator.clipboard.readText()" in page
+    assert "capauth sign-challenge" in page
+    assert 'localStorage.setItem("capauth_manual_fp",fp)' in page
+    assert 'localStorage.getItem("capauth_manual_fp")' in page
+    assert 'document.getElementById("manual-pgp").open=true' in page
+    assert "\u2014" not in page and "\u2013" not in page  # no em or en dashes
+
+
 def test_passkey_enrollment_page_documents_exact_signing_contract(oidc_app):
     client, _router = oidc_app
 

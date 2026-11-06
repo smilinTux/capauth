@@ -29,7 +29,6 @@ from __future__ import annotations
 
 import logging
 import os
-from pathlib import Path
 from typing import Any, Optional
 
 logger = logging.getLogger("capauth.integration")
@@ -203,7 +202,8 @@ def register_self(pid_file: Optional[str] = None) -> bool:
     """Advertise capauth to skcapstone's discovery registry, if present.
 
     Args:
-        pid_file: Optional pid-file path used as a liveness signal.
+        pid_file: Explicit PID-file path owned by a real daemon. Without one,
+            register discovery only; never invent a PID file.
 
     Returns:
         ``True`` if registered, ``False`` otherwise.
@@ -213,7 +213,7 @@ def register_self(pid_file: Optional[str] = None) -> bool:
     try:
         _get_sdk().register_service(
             SERVICE,
-            pid_file=pid_file or str(Path("~/.capauth/service.pid").expanduser()),
+            pid_file=pid_file,
         )
         return True
     except Exception as exc:  # pragma: no cover - defensive

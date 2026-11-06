@@ -6,6 +6,40 @@ All notable changes to `capauth` are documented here. The format is based on
 
 ## [Unreleased]
 
+- Service discovery no longer invents a nonexistent CapAuth PID file. Without
+  an explicit daemon-owned PID path, health remains unknown.
+
+- Release tags (`v*`) now also publish the service image
+  `ghcr.io/smilintux/capauth:<version>` (`.github/workflows/image.yml`): the
+  tag must be on main, a published version is never overwritten, the image is
+  smoke-tested (`capauth --version`, `/capauth/v1/status`) before the push,
+  and the job summary records the digest to pin (`<version>@sha256:...`).
+
+- `capauth sign-challenge`: reads the CapAuth login challenge from the
+  clipboard (or `--stdin`), refuses anything that is not a complete
+  `CAPAUTH_NONCE_V1`/`V2` challenge, signs it with gpg (gpg-agent's pinentry
+  asks for the passphrase; the tool never handles it) and puts the armored
+  signature back on the clipboard (or `--stdout`), printing only
+  `signed, paste it now`. Key: `--key`, `$CAPAUTH_SIGN_KEY`, or the profile.
+  The OIDC login page gains a "Paste signature and continue" button, names
+  the command in its steps and remembers the fingerprint of the last manual
+  login, so a repeat login is copy, sign, paste. Docs: `docs/SIGN_CHALLENGE.md`.
+
+- Service image builds from a plain checkout again: the Dockerfile takes
+  `--build-arg CAPAUTH_VERSION=<version>` (default `0.0.0+docker`) for
+  setuptools-scm, because `.dockerignore` keeps `.git` out of the context.
+
+- OIDC IdP: a static client may set `require_nonce: false` so stock
+  Authentik's OAuth source, which never sends an OIDC `nonce`, can use the
+  authorization code flow. State, PKCE S256 and the confidential client secret
+  stay mandatory; the default is unchanged (nonce required), and a nonce that
+  is sent must still be well formed.
+
+- CI: green on main again. `ruff format` (pinned 0.15.4) applied to
+  `tests/test_backup_fallback.py`; the Python 3.10 job no longer installs
+  skcapstone (it requires 3.11+), and the skcapstone integration tests skip
+  there while 3.11+ asserts the import so they cannot skip silently.
+
 - Raise operator proof absolute and idle ceilings to 24 hours while keeping
   access capabilities bounded to five minutes (card `4af0ae7f`).
 

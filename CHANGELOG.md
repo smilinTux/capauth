@@ -6,6 +6,9 @@ All notable changes to `capauth` are documented here. The format is based on
 
 ## [Unreleased]
 
+- OIDC login asks for the vault passphrase in a masked in-page dialog instead of
+  a browser `prompt()`, which showed the passphrase as it was typed.
+
 - Service discovery no longer invents a nonexistent CapAuth PID file. Without
   an explicit daemon-owned PID path, health remains unknown.
 

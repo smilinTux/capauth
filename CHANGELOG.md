@@ -6,6 +6,10 @@ All notable changes to `capauth` are documented here. The format is based on
 
 ## [Unreleased]
 
+- Agent instructions live in one file, `AGENTS.md`, reshaped to the sk-standards
+  AGENT_INSTRUCTIONS_STANDARD. `CLAUDE.md` and `.cursorrules` are removed (Claude Code reads
+  `AGENTS.md` natively and skips it when a `CLAUDE.md` sits next to it).
+
 - OIDC login asks for the vault passphrase in a masked in-page dialog instead of
   a browser `prompt()`, which showed the passphrase as it was typed.
 

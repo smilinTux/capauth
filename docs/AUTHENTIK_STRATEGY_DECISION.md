@@ -5,8 +5,8 @@ retiring the custom fork. By this document's own lettering that is **Option C2 /
 Track 2** (section 4 Option C, sub-flavor C2; section 5 Track 2). It is NOT
 section 4 "Option B", which means keeping the custom image fork.
 Chef's original words, relayed through the coordinator on 2026-10-23 as part of
-the full Authentik 2026.8.5 upgrade (framework release v2.26.17): "patch now,
-and b for capauth."
+the full Authentik 2026.8.5 upgrade: "patch now, and b for capauth." (Wording as
+recorded in the original version of this PR; the repo holds no other record of it.)
 Clarification 2026-11-07: Chef confirmed that "b for capauth" meant CapAuth as an
 OAuth Source on stock Authentik (this document's C2 / Track 2), not keeping the
 fork. It does not refer to this document's section 4 Option B.
@@ -332,11 +332,11 @@ likely to be accepted. A PGP *Stage* PR is low-EV and should not be our first mo
 
 ## 6. Concrete next steps
 
-1. **Decision sign-off (Chef):** approve the two-track strategy; mark the
+1. **Decision sign-off (Chef):** done, see Status (C2 / Track 2). Mark the
    web-patching fork as deprecated-for-browser-use.
 2. **Track 1:** publish/polish the Nextcloud CapAuth app (it's complete); pick
    the next target app (Forgejo scaffold → finish, or another high-use app).
-3. **Track 2 (spike):** add OIDC provider endpoints to the standalone CapAuth
+3. **Track 2 (decided; lab proof pending, see the cutover plan):** add OIDC provider endpoints to the standalone CapAuth
    service; stand up stock Authentik with CapAuth registered as an OAuth/OIDC
    **Source**; prove PGP-login→Authentik-session→downstream-app SSO E2E on `.13`.
    This replaces the cap-image deploy.
@@ -387,7 +387,7 @@ likely to be accepted. A PGP *Stage* PR is low-EV and should not be our first mo
 
 ---
 
-## 2026-10-23 cutover plan (nor, as part of the 2026.8.5 upgrade, v2.26.17)
+## 2026-10-23 cutover plan (nor, as part of the 2026.8.5 upgrade)
 
 Chef's decision is Option C2 / Track 2 (CapAuth as an OIDC/OAuth Source on stock
 Authentik). This section records the concrete cutover plan for **nor**, the only
@@ -398,7 +398,9 @@ estate still running the `Dockerfile.authentik-capauth` fork. NAM is unaffected
 
 - nor's `sksso-prod_server`/`_worker` move from the custom image
   (`skgit.skstack01.douno.it/skadmin/authentik-capauth:*`) to the **stock**
-  `ghcr.io/goauthentik/server:2026.8.5` image, the same image NAM runs.
+  `ghcr.io/goauthentik/server:2026.8.5` image. NAM never ran the fork. Its
+  current Authentik version is not recorded in this repo (the scope paragraph at
+  the top says 2026.2.7 after the tactical patch); open question, confirm on NAM.
 - The sksso role's `sksso.CAPAUTH_ENABLED: true` path (documented in
   `v1/ansible/optional/sksso/README.md`, "CapAuth login (optional)") replaces
   the baked-in stage: the standalone `capauth` service becomes an Authentik
@@ -406,13 +408,31 @@ estate still running the `Dockerfile.authentik-capauth` fork. NAM is unaffected
   into Authentik's bundle. This is already-shipped, already-tested code (commit
   `ecc8e50`, "per-client require_nonce so stock Authentik's OAuth source can
   log in"), not new engineering.
-- The existing CapAuth flow/stage objects baked in by the fork's blueprint (see
-  `AUTHENTIK_DEPLOYMENT_SKSSO.md`, flow `97730dbd-b5fc-4171-8dce-4de5273c1db2`)
-  are superseded by `tasks/capauth_provision.yml`'s `CAPAUTH_FLOW_SLUG`
-  (default `capauth-authentication`) and OAuth source objects. They are NOT
-  touched automatically; retiring the old objects is a manual admin-UI cleanup
-  step after the new flow is proven (see "Rollback" in the README's CapAuth
-  section for the exact unbind order, run in reverse as an adopt order).
+- The fork-only CapAuth objects are the ones the fork's blueprint
+  (`src/capauth/authentik/blueprints/capauth-pgp-login.yaml`) creates: the
+  `capauth.capauthstage` instance `capauth-pgp`, the authentication flow with
+  slug `capauth-authentication`, and that flow's two stage bindings (CapAuthStage
+  at order 0, `default-authentication-login` at order 10), plus the fork app's
+  tables (`CapAuthStage`, `CapAuthKeyRegistry`). Those are what a later cleanup
+  may retire. Flow `97730dbd-b5fc-4171-8dce-4de5273c1db2` is NOT one of them: it
+  is the general `skstack01-application-authorization` flow that apps such as
+  Forgejo use (see `AUTHENTIK_FORGEJO_DEPLOYMENT.md`), and it must not be
+  retired. `AUTHENTIK_DEPLOYMENT_SKSSO.md` describes adding a CapAuth stage
+  binding to that flow. Open question: whether that binding was actually added
+  on nor; if so, only that binding is fork-only, and it must be unbound without
+  touching the flow itself.
+- Slug clash: the fork's blueprint flow slug `capauth-authentication` is also
+  the default `CAPAUTH_FLOW_SLUG` of `tasks/capauth_provision.yml`. While the
+  fork still runs, the stock OAuth-source flow MUST be provisioned with a
+  distinct slug (for example `capauth-source-authentication`, set through
+  `CAPAUTH_FLOW_SLUG`), or provisioning would overwrite the fork's flow. Open
+  question: confirm the role honours the override in the lab before relying on
+  it; if it does not, a parallel run on the same instance is not possible and
+  step L3 below must be dropped in favour of a separate lab instance.
+- The old fork objects are NOT touched automatically; retiring them is a
+  manual admin-UI cleanup step after the new flow is proven (see "Rollback" in
+  the README's CapAuth section for the exact unbind order, run in reverse as an
+  adopt order).
 - Enrolled users move from the fork's `CapAuthKeyRegistry` (one row per PGP
   fingerprint, no linked Authentik user) to `sksso.CAPAUTH_USERS`
   (fingerprint maps to an existing Authentik user). Every current nor CapAuth
@@ -426,36 +446,62 @@ The order runs from the fork to stock with CapAuth as an OAuth Source. The fork
 is retired FIRST, at nor's current Authentik version, and the stock upgrade hops
 come AFTER on the stock image. Reason: upgrading the fork through the
 intermediate versions would mean rebuilding it against each one for no benefit.
+Lab steps (L) may restore dumps freely. Production steps (P) never restore a
+dump; rollback on nor is the separate conditional section below.
 
-1. Reproduce nor's real pre-cutover shape in the lab: nor currently runs the
-   fork image (`Dockerfile.authentik-capauth`) on the 2025.12.6 line, so build
-   `authentik-capauth:2025.12.6` on skstack06 and deploy the sksso role with it.
-   Open question: confirm the exact fork image tag and Authentik version
-   running on nor today.
-2. Seed representative data: a handful of users and groups, at least one OIDC
-   provider, the embedded outpost plus a forward-auth proxy provider, and
-   enough CapAuth-fork enrollments (`CapAuthKeyRegistry` rows) to exercise the
-   migration.
-3. Parallel-run in the lab: enable `sksso.CAPAUTH_ENABLED: true` alongside the
-   still-running fork, bring up the `capauth` service and OAuth source, and
-   prove login through the new path end to end (challenge and verify, OAuth
-   source login, SSO fan-out) while the fork path still works.
-4. Prepare the user migration: map each fork enrollment (PGP fingerprint) to an
-   existing Authentik user in `sksso.CAPAUTH_USERS`. Open question: the list of
-   current nor CapAuth users and the migration checklist do not exist yet and
-   must be written before the lab cutover.
-5. Lab cutover, fork to stock at the SAME version: swap the fork image for the
-   stock `ghcr.io/goauthentik/server` image at 2025.12.6, keep `CAPAUTH_ENABLED:
-   true`, and re-verify every login path (password, OIDC apps, forward-auth, the
-   CapAuth OAuth source). Then test the rollback: restore the pre-cutover dump
-   and confirm the fork image still boots against it. Open question: whether the
-   stock image runs cleanly against a database that carries the fork's extra
-   tables and migrations is untested.
-6. Lab upgrade on stock: 2025.12.6 to 2026.2.7 to 2026.5.7 to 2026.8.5, with the
-   login paths from step 5 re-verified at each hop.
-7. Only after the lab passes end to end, repeat steps 3 to 6 on nor, in the same
-   order, with the pre-cutover dump taken first. Open question: the nor change
-   window and the change approval record are not captured here.
+Lab (skstack06):
+
+- L1. Reproduce nor's real pre-cutover shape: nor currently runs the fork image
+  (`Dockerfile.authentik-capauth`) on the 2025.12.6 line, so build
+  `authentik-capauth:2025.12.6` on skstack06 and deploy the sksso role with it.
+  Open question: confirm the exact fork image tag and Authentik version running
+  on nor today.
+- L2. Seed representative data: a handful of users and groups, at least one OIDC
+  provider, the embedded outpost plus a forward-auth proxy provider, and enough
+  CapAuth-fork enrollments (`CapAuthKeyRegistry` rows) to exercise the migration.
+- L3. Parallel-run: enable `sksso.CAPAUTH_ENABLED: true` alongside the
+  still-running fork, with a distinct `CAPAUTH_FLOW_SLUG` (see "Slug clash"
+  above), bring up the `capauth` service and OAuth source, and prove login
+  through the new path end to end (challenge and verify, OAuth source login, SSO
+  fan-out) while the fork path still works.
+- L4. Prepare the user migration: map each fork enrollment (PGP fingerprint) to
+  an existing Authentik user in `sksso.CAPAUTH_USERS`. Open question: the list of
+  current nor CapAuth users and the migration checklist do not exist yet and
+  must be written before L5.
+- L5. Lab cutover, fork to stock at the SAME version: take a dump, swap the fork
+  image for the stock `ghcr.io/goauthentik/server` image at 2025.12.6, keep
+  `CAPAUTH_ENABLED: true`, and re-verify every login path (password, OIDC apps,
+  forward-auth, the CapAuth OAuth source). Then, lab only, rehearse the rollback:
+  restore the dump and confirm the fork image still boots against it. Open
+  question: whether the stock image runs cleanly against a database that carries
+  the fork's extra tables and migrations is untested.
+- L6. Lab upgrade on stock: 2025.12.6 to 2026.2.7 to 2026.5.7 to 2026.8.5, with
+  the L5 login-path checks repeated at each hop.
+
+Production (nor), only after L1 to L6 pass end to end:
+
+- P1. Take and verify a pre-cutover database dump and record the running fork
+  image tag. Open question: the nor change window and change approval record
+  are not captured here.
+- P2. Parallel-run: enable `CAPAUTH_ENABLED: true` with the distinct
+  `CAPAUTH_FLOW_SLUG` alongside the running fork and prove the new login path.
+- P3. Complete the user migration (the L4 checklist) so every CapAuth user maps
+  to an Authentik user.
+- P4. Cutover: swap the fork image for stock at the current version, re-verify
+  every login path.
+- P5. Upgrade on stock through the same hops as L6, verifying login paths at
+  each hop.
+
+### Rollback on nor (conditional, not a plan step)
+
+Only if a production step fails verification. Dump restore is destructive for
+anything written after the dump (new users, sessions, enrollments), so a restore
+needs an explicit decision at the time and is never run as part of P1 to P5. The
+options, in order of preference: (1) revert the image reference to the recorded
+fork tag if the database was not migrated forward; (2) restore the P1 dump only
+once the data written since has been accounted for. Open question: which of
+these is viable after P4 depends on the untested L5 stock-on-fork-database
+question above.
 
 ### Fork retirement (after the lab proof and after nor is cut over)
 

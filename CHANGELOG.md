@@ -6,6 +6,10 @@ All notable changes to `capauth` are documented here. The format is based on
 
 ## [Unreleased]
 
+### Security
+
+- Raised `python-multipart` to `>=0.0.31`, `PyJWT` to `>=2.15.0` and `zeroconf` to `>=0.149.16` to clear the 2026-11-13 dependency sweep findings.
+
 - Agent instructions live in one file, `AGENTS.md`, reshaped to the sk-standards
   AGENT_INSTRUCTIONS_STANDARD. `CLAUDE.md` and `.cursorrules` are removed (Claude Code reads
   `AGENTS.md` natively and skips it when a `CLAUDE.md` sits next to it).

@@ -583,6 +583,7 @@ All notable changes to `capauth` are documented here. The format is based on
 
 ### Security
 
+- Raised `python-multipart` to `>=0.0.31`, `PyJWT` to `>=2.15.0` and `zeroconf` to `>=0.149.16` to clear the 2026-11-13 dependency sweep findings.
 - **Revoked / expired signing-key rejection**: the `pgpy` and `gnupg` verify
   paths now reject a signing key that carries a revocation signature or is expired
   **before** the signature check (`KeyRevokedError` / `KeyExpiredError`), closing

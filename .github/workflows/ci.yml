@@ -37,11 +37,11 @@ jobs:
       # `import skcapstone` succeeds without it while
       # `from skcapstone.coordination import Board` does not. --no-deps means we
       # have to name it ourselves.
-      # skcapstone requires Python 3.11+, capauth supports 3.10: on 3.10 the
-      # integration tests skip (pytest.importorskip); on 3.11+ the import is
+      # skcapstone requires Python 3.12+, capauth supports 3.10: on 3.10 and 3.11
+      # the integration tests skip (pytest.importorskip); on 3.12 the import is
       # asserted here so those tests can never skip silently.
       - name: Install skcapstone (optional integration backbone) from source
-        if: matrix.python-version != '3.10'
+        if: matrix.python-version == '3.12'
         run: |
           pip install --no-deps --no-cache-dir \
             "skcapstone @ git+https://github.com/smilinTux/skcapstone" \

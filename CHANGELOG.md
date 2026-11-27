@@ -6,6 +6,12 @@ All notable changes to `capauth` are documented here. The format is based on
 
 ## [Unreleased]
 
+- The `edge-device` identity class now admits `skchat.prekey`, so an enrolled
+  device can publish, sign and delete its own prekey bundles (Chef decision,
+  2026-11-27). Ceiling only: the capability still needs a real token grant and
+  the rule's attested enrollment floor, and `skchat.groups`, `token:issue`,
+  `identity:sign` and the wildcard stay refused for the class.
+
 - Agent instructions live in one file, `AGENTS.md`, reshaped to the sk-standards
   AGENT_INSTRUCTIONS_STANDARD. `CLAUDE.md` and `.cursorrules` are removed (Claude Code reads
   `AGENTS.md` natively and skips it when a `CLAUDE.md` sits next to it).

@@ -321,8 +321,17 @@ DEFAULT_CLASSES: dict[str, IdentityClass] = {
         # talk) and nothing that reshapes the fleet. skchat.groups is deliberately
         # out: it mutates OTHER subjects' memberships, which is not a thing a lost
         # phone should be able to do on its own.
+        #
+        # skchat.prekey (Chef, 2026-11-27): an enrolled device publishes, signs and
+        # deletes its OWN prekey bundles; without it a linked device cannot take part
+        # in encrypted chat at all. Only that one capability: the prekey fetch route
+        # is a public directory with no capability gate, so no read counterpart is
+        # needed. It stays behind the rule's attested floor and a real token grant
+        # (this list is a ceiling, not a grant), so a TOFU-enrolled or ungranted
+        # device still cannot publish.
         allowed_capabilities=[
             "skchat.send",
+            "skchat.prekey",
             "skchat.media.write",
             "skchat.voice",
             "skchat.calls",

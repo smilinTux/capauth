@@ -288,6 +288,70 @@ def test_node_is_still_allowed_the_inference_capability_it_exists_for(tmp_path):
     assert "granted" in decision.reason
 
 
+EDGE_SUBJECT = "phone@chef.skworld.io"
+
+
+def _edge_device(base: Path, capabilities, *, mode: EnrollmentMode = EnrollmentMode.ATTESTED):
+    _enroll(base, mode=mode, subject=EDGE_SUBJECT)
+    _issue(base, capabilities, subject=EDGE_SUBJECT)
+    assign_identity_class(EDGE_SUBJECT, IdentityClassName.EDGE_DEVICE, base_dir=base)
+
+
+def test_edge_device_ceiling_admits_prekey_and_only_that_much_more():
+    edge = DEFAULT_CLASSES[IdentityClassName.EDGE_DEVICE.value]
+
+    assert edge.permits("skchat.prekey")
+    assert not edge.forbids("skchat.prekey")
+    # Least privilege: the neighbouring skchat capabilities that were NOT decided stay out.
+    assert not edge.permits("skchat.groups")
+    assert not edge.permits("skchat.prekeys")
+    # Operator powers remain structurally forbidden.
+    assert edge.forbids(Capability.TOKEN_ISSUE.value)
+
+
+def test_edge_device_with_a_grant_may_publish_a_prekey(tmp_path):
+    _edge_device(tmp_path, ["skchat.prekey"])
+
+    decision = decide(EDGE_SUBJECT, "skchat.prekey", base_dir=tmp_path)
+
+    assert decision.allow is True
+    assert "granted" in decision.reason
+
+
+def test_edge_device_is_still_refused_a_non_listed_skchat_action(tmp_path):
+    # Even holding a signed grant for skchat.groups, the ceiling refuses it:
+    # a lost phone must not mutate other subjects' group memberships.
+    _edge_device(tmp_path, ["skchat.prekey", "skchat.groups"])
+
+    decision = decide(EDGE_SUBJECT, "skchat.groups", base_dir=tmp_path)
+
+    assert decision.allow is False
+    assert decision.reason == "identity class 'edge-device' does not permit capability 'skchat.groups'"
+
+
+def test_edge_device_without_a_prekey_grant_is_refused(tmp_path):
+    # The class admits the capability; it does not grant it.
+    _edge_device(tmp_path, ["skchat.inbox"])
+
+    assert decide(EDGE_SUBJECT, "skchat.prekey", base_dir=tmp_path).allow is False
+
+
+def test_tofu_edge_device_cannot_publish_a_prekey_even_with_a_grant(tmp_path):
+    # skchat.prekey's own rule floor is attested; the ceiling does not lower it.
+    _edge_device(tmp_path, ["skchat.prekey"], mode=EnrollmentMode.TOFU)
+
+    assert decide(EDGE_SUBJECT, "skchat.prekey", base_dir=tmp_path).allow is False
+
+
+def test_edge_device_wildcard_token_still_cannot_issue_tokens(tmp_path):
+    _edge_device(tmp_path, [Capability.ALL.value])
+
+    decision = decide(EDGE_SUBJECT, Capability.TOKEN_ISSUE.value, base_dir=tmp_path)
+
+    assert decision.allow is False
+    assert decision.reason == "identity class 'edge-device' forbids capability 'token:issue'"
+
+
 def test_class_floor_stacks_on_top_of_the_capability_floor(tmp_path):
     # skchat.inbox's own floor is tofu, but the node class requires attested, so
     # a tofu-enrolled node is refused a capability the rule alone would allow.

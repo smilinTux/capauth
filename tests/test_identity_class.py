@@ -326,7 +326,10 @@ def test_edge_device_is_still_refused_a_non_listed_skchat_action(tmp_path):
     decision = decide(EDGE_SUBJECT, "skchat.groups", base_dir=tmp_path)
 
     assert decision.allow is False
-    assert decision.reason == "identity class 'edge-device' does not permit capability 'skchat.groups'"
+    assert (
+        decision.reason
+        == "identity class 'edge-device' does not permit capability 'skchat.groups'"
+    )
 
 
 def test_edge_device_without_a_prekey_grant_is_refused(tmp_path):
